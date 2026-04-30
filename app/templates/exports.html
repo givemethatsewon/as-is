@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}수출매칭 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">FIFO Matching</p>
+    <h1>수출매칭</h1>
+  </div>
+  <form class="inline-form" action="/exports/matching/run" method="post">
+    <input type="date" name="export_date">
+    <button class="button primary" type="submit">자동 매칭 실행</button>
+  </form>
+</section>
+
+{% if message %}<p class="notice success">{{ message }}</p>{% endif %}
+
+<section class="table-section">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>수출일</th><th>Part Number</th><th>Origin</th><th>필요수량</th><th>설명</th><th>단가</th><th>금액</th><th>상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for export in exports %}
+        <tr>
+          <td>{{ export.export_date }}</td>
+          <td>{{ export.part_number }}</td>
+          <td>{{ export.origin }}</td>
+          <td>{{ export.required_qty }}</td>
+          <td>{{ export.description or '' }}</td>
+          <td>{{ export.unit_price or '' }}</td>
+          <td>{{ export.amount or '' }}</td>
+          <td><span class="status {{ export.status }}">{{ export.status }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty">수출 요청 데이터가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+

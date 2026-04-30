@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}리포트 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Downloads</p>
+    <h1>리포트</h1>
+  </div>
+  <div class="actions">
+    <a class="button" href="/api/reports/export-allocations.csv">CSV</a>
+    <a class="button primary" href="/api/reports/download.xlsx">XLSX</a>
+  </div>
+</section>
+
+<section class="table-section">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>수출일</th><th>Part Number</th><th>필요</th><th>매칭</th><th>수입신고번호</th><th>수리일</th><th>Origin</th><th>HS</th><th>란/행</th><th>잔량</th><th>상태</th><th>환급예상</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in allocations %}
+        <tr>
+          <td>{{ row.export_date }}</td>
+          <td>{{ row.part_number }}</td>
+          <td>{{ row.required_qty }}</td>
+          <td>{{ row.matched_qty }}</td>
+          <td>{{ row.import_declaration_no }}</td>
+          <td>{{ row.import_accepted_date }}</td>
+          <td>{{ row.origin }}</td>
+          <td>{{ row.hs_code }}</td>
+          <td>{{ row.line_no }}/{{ row.row_no }}</td>
+          <td>{{ row.remaining_qty_after }}</td>
+          <td><span class="status {{ row.match_status }}">{{ row.match_status }}</span></td>
+          <td>{{ row.expected_refund_amount or '' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="12" class="empty">매칭 결과가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}재고 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Lots</p>
+    <h1>재고 조회</h1>
+  </div>
+</section>
+
+<form class="filterbar" method="get" action="/inventory">
+  <input name="part_number" placeholder="Part Number" value="{{ part_number }}">
+  <input name="origin" placeholder="Origin" value="{{ origin }}">
+  <select name="status">
+    <option value="">전체 상태</option>
+    {% for item in ["available", "expiring_soon", "expired", "used_up", "blocked"] %}
+    <option value="{{ item }}" {% if status == item %}selected{% endif %}>{{ item }}</option>
+    {% endfor %}
+  </select>
+  <button class="button primary" type="submit">조회</button>
+</form>
+
+<section class="metric-grid compact">
+  <article class="metric"><span>수입</span><strong>{{ summary.total_imported_qty }}</strong></article>
+  <article class="metric"><span>수출</span><strong>{{ summary.total_exported_qty }}</strong></article>
+  <article class="metric"><span>잔량</span><strong>{{ summary.remaining_qty }}</strong></article>
+  <article class="metric"><span>사용 가능</span><strong>{{ summary.available_qty }}</strong></article>
+  <article class="metric warn"><span>만료</span><strong>{{ summary.expired_qty }}</strong></article>
+</section>
+
+<section class="table-section">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Part Number</th><th>Origin</th><th>HS</th><th>수리일</th><th>신고번호</th><th>란/행</th><th>수입</th><th>사용</th><th>잔량</th><th>상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lot in summary.lots %}
+        <tr>
+          <td>{{ lot.part_number }}</td>
+          <td>{{ lot.origin }}</td>
+          <td>{{ lot.hs_code }}</td>
+          <td>{{ lot.import_accepted_date }}</td>
+          <td>{{ lot.import_declaration_no }}</td>
+          <td>{{ lot.line_no }}/{{ lot.row_no }}</td>
+          <td>{{ lot.import_qty }}</td>
+          <td>{{ lot.used_qty }}</td>
+          <td>{{ lot.remaining_qty }}</td>
+          <td><span class="status {{ lot.status }}">{{ lot.status }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty">조회 결과가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+

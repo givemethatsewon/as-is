@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}업로드 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Preview First</p>
+    <h1>업로드</h1>
+  </div>
+</section>
+
+{% if message %}<p class="notice success">{{ message }}</p>{% endif %}
+{% if error %}<p class="notice danger">{{ error }}</p>{% endif %}
+
+<section class="split">
+  <form class="panel" action="/upload/imports/preview" method="post" enctype="multipart/form-data">
+    <h2>수입 데이터</h2>
+    <p class="muted">CSV 또는 XLSX 파일을 미리보기로 검증한 뒤 신규 row만 확정 반영합니다.</p>
+    <input type="file" name="file" accept=".csv,.xlsx" required>
+    <button class="button primary" type="submit">미리보기</button>
+  </form>
+
+  <form class="panel" action="/upload/exports/preview" method="post" enctype="multipart/form-data">
+    <h2>수출 요청</h2>
+    <p class="muted">수출일자, 원산지, Part Number, 필요수량을 검증합니다.</p>
+    <input type="file" name="file" accept=".csv,.xlsx" required>
+    <button class="button primary" type="submit">미리보기</button>
+  </form>
+</section>
+
+<section class="table-section">
+  <h2>최근 업로드 배치</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>유형</th><th>파일명</th><th>전체</th><th>신규</th><th>중복</th><th>충돌</th><th>오류</th><th>확정</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for batch in batches %}
+        <tr>
+          <td>{{ batch.upload_type }}</td>
+          <td>{{ batch.filename }}</td>
+          <td>{{ batch.total_rows }}</td>
+          <td>{{ batch.new_count }}</td>
+          <td>{{ batch.duplicate_count }}</td>
+          <td>{{ batch.conflict_count }}</td>
+          <td>{{ batch.error_count }}</td>
+          <td>{{ '완료' if batch.confirmed_at else '대기' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty">아직 업로드 배치가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+

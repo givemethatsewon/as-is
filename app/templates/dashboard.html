@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}대시보드 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Inventory Control</p>
+    <h1>대시보드</h1>
+  </div>
+  <a class="button primary" href="/upload">파일 업로드</a>
+</section>
+
+<section class="metric-grid">
+  <article class="metric"><span>전체 수입 수량</span><strong>{{ summary.total_import_qty }}</strong></article>
+  <article class="metric"><span>전체 수출 매칭 수량</span><strong>{{ summary.total_matched_qty }}</strong></article>
+  <article class="metric"><span>전체 잔량</span><strong>{{ summary.total_remaining_qty }}</strong></article>
+  <article class="metric"><span>사용 가능 재고</span><strong>{{ summary.available_qty }}</strong></article>
+  <article class="metric warn"><span>360일 초과 재고</span><strong>{{ summary.expired_qty }}</strong></article>
+  <article class="metric"><span>소진 lot</span><strong>{{ summary.used_up_lots_count }}</strong></article>
+  <article class="metric caution"><span>30일 이내 만료 예정</span><strong>{{ summary.expiring_soon_lots_count }}</strong></article>
+</section>
+{% endblock %}
+

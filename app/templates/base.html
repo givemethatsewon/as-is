@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}As-Is{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/dashboard">
+        <span class="brand-mark">AS</span>
+        <span>
+          <strong>처음처럼 - 원상태수출관리</strong>
+          <small>As-Is</small>
+        </span>
+      </a>
+      <nav class="nav">
+        <a class="{{ 'active' if active == 'dashboard' else '' }}" href="/dashboard">대시보드</a>
+        <a class="{{ 'active' if active == 'upload' else '' }}" href="/upload">업로드</a>
+        <a class="{{ 'active' if active == 'inventory' else '' }}" href="/inventory">재고</a>
+        <a class="{{ 'active' if active == 'exports' else '' }}" href="/exports">수출매칭</a>
+        <a class="{{ 'active' if active == 'reports' else '' }}" href="/reports">리포트</a>
+      </nav>
+    </header>
+    <main class="shell">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
+

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}업로드 미리보기 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">{{ batch.upload_type }}</p>
+    <h1>업로드 미리보기</h1>
+  </div>
+  <form action="/upload/confirm" method="post">
+    <input type="hidden" name="batch_id" value="{{ batch.id }}">
+    <button class="button primary" type="submit" {% if batch.error_count > 0 or batch.confirmed_at %}disabled{% endif %}>신규 row 확정</button>
+  </form>
+</section>
+
+<section class="metric-grid compact">
+  <article class="metric"><span>전체</span><strong>{{ batch.total_rows }}</strong></article>
+  <article class="metric"><span>신규</span><strong>{{ batch.new_count }}</strong></article>
+  <article class="metric"><span>중복</span><strong>{{ batch.duplicate_count }}</strong></article>
+  <article class="metric caution"><span>충돌</span><strong>{{ batch.conflict_count }}</strong></article>
+  <article class="metric warn"><span>오류</span><strong>{{ batch.error_count }}</strong></article>
+</section>
+
+<section class="table-section">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Row</th><th>상태</th><th>메시지</th><th>정규화 데이터</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.row_number }}</td>
+          <td><span class="status {{ row.row_status }}">{{ row.row_status }}</span></td>
+          <td>{{ row.message }}</td>
+          <td class="payload">{{ row.payload_json }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
