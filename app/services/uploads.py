@@ -27,6 +27,11 @@ IMPORT_REQUIRED_COLUMNS = {
     "qty_unit",
 }
 EXPORT_REQUIRED_COLUMNS = {"export_date", "origin", "part_number", "required_qty"}
+EXPORT_OPTIONAL_COLUMNS = {
+    "hs_code",
+    "description",
+    "unit_price",
+}
 IMPORT_COLUMN_ALIASES = {
     "import_declaration_no": ["import_declaration_no", "declaration_no", "수입신고번호", "신고번호"],
     "import_accepted_date": [
@@ -47,6 +52,15 @@ IMPORT_COLUMN_ALIASES = {
     "spec": ["spec", "규격", "규격2", "description", "Description"],
     "import_qty": ["import_qty", "quantity", "qty", "수량", "수량_1"],
     "qty_unit": ["qty_unit", "unit", "수량단위", "수량단위_1"],
+}
+EXPORT_COLUMN_ALIASES = {
+    "export_date": ["export_date", "수출일", "수출일자", "수출예정일"],
+    "origin": ["origin", "원산지"],
+    "part_number": ["part_number", "Part Number", "판매부번", "품번"],
+    "hs_code": ["hs_code", "HS Code", "세번", "세번코드"],
+    "required_qty": ["required_qty", "수출요청수량", "필요수량", "필요 수량", "매칭필요수량"],
+    "description": ["description", "Description", "품명", "규격", "설명"],
+    "unit_price": ["unit_price", "단가"],
 }
 CANONICAL_FIELD_DESCRIPTIONS = {
     "export_date": "수출 예정일 또는 수출일",
@@ -75,14 +89,6 @@ def _json_default(value: Any) -> str:
     if isinstance(value, Decimal):
         return str(value)
     return str(value)
-
-
-def _require_columns(rows: list[dict[str, Any]], required: set[str]) -> None:
-    columns = set(rows[0].keys()) if rows else set()
-    missing = sorted(required - columns)
-    if missing:
-        found = ", ".join(sorted(columns)) if columns else "(none)"
-        raise ValueError(f"Missing required canonical columns: {', '.join(missing)}. Found columns: {found}")
 
 
 def normalize_import_columns(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, str]]:
@@ -114,6 +120,39 @@ def normalize_import_columns(rows: list[dict[str, Any]]) -> tuple[list[dict[str,
             f"{', '.join(missing)}. Found columns: {', '.join(columns)}"
         )
     mapping_preview = {canonical: source_by_canonical[canonical] for canonical in sorted(IMPORT_REQUIRED_COLUMNS)}
+    return normalized_rows, mapping_preview
+
+
+def normalize_export_columns(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    if not rows:
+        return rows, {}
+
+    alias_lookup = _alias_lookup(EXPORT_COLUMN_ALIASES)
+    columns = list(rows[0].keys())
+    canonical_by_source: dict[str, str] = {}
+    source_by_canonical: dict[str, str] = {}
+
+    for source in columns:
+        normalized = normalize_column_name(source)
+        canonical = alias_lookup.get(normalized, normalized)
+        if canonical in source_by_canonical:
+            raise ValueError(
+                "Multiple columns map to the same canonical field "
+                f"{canonical}: {source_by_canonical[canonical]}, {source}. "
+                f"Found columns: {', '.join(columns)}"
+            )
+        canonical_by_source[source] = canonical
+        source_by_canonical[canonical] = source
+
+    normalized_rows = [{canonical_by_source[source]: value for source, value in row.items()} for row in rows]
+    missing = sorted(EXPORT_REQUIRED_COLUMNS - set(source_by_canonical))
+    if missing:
+        raise ValueError(
+            "Missing required canonical columns: "
+            f"{', '.join(missing)}. Found columns: {', '.join(columns)}"
+        )
+    mapped_columns = sorted((EXPORT_REQUIRED_COLUMNS | EXPORT_OPTIONAL_COLUMNS) & set(source_by_canonical))
+    mapping_preview = {canonical: source_by_canonical[canonical] for canonical in mapped_columns}
     return normalized_rows, mapping_preview
 
 
@@ -198,7 +237,12 @@ def _classify_existing_import(existing: ImportLot, payload: dict[str, Any]) -> t
 
 def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> PreviewResult:
     rows, column_mapping = normalize_import_columns(rows)
-    batch = UploadBatch(upload_type="imports", filename=filename, total_rows=len(rows))
+    batch = UploadBatch(
+        upload_type="imports",
+        filename=filename,
+        total_rows=len(rows),
+        column_mapping_json=json.dumps(column_mapping, ensure_ascii=False),
+    )
     db.add(batch)
     db.flush()
     statuses: Counter[str] = Counter()
@@ -239,8 +283,13 @@ def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
 
 
 def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> PreviewResult:
-    _require_columns(rows, EXPORT_REQUIRED_COLUMNS)
-    batch = UploadBatch(upload_type="exports", filename=filename, total_rows=len(rows))
+    rows, column_mapping = normalize_export_columns(rows)
+    batch = UploadBatch(
+        upload_type="exports",
+        filename=filename,
+        total_rows=len(rows),
+        column_mapping_json=json.dumps(column_mapping, ensure_ascii=False),
+    )
     db.add(batch)
     db.flush()
     statuses: Counter[str] = Counter()
@@ -267,7 +316,7 @@ def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
     _apply_status_counts(batch, statuses)
     db.commit()
     db.refresh(batch)
-    return PreviewResult(batch=batch, warnings=[], column_mapping={column: column for column in sorted(EXPORT_REQUIRED_COLUMNS)})
+    return PreviewResult(batch=batch, warnings=[], column_mapping=column_mapping)
 
 
 def _apply_status_counts(batch: UploadBatch, statuses: Counter[str]) -> None:
@@ -286,9 +335,11 @@ def _payload_values_match(left: dict[str, Any], right: dict[str, Any]) -> bool:
 def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise ValueError("Upload batch not found.")
+        raise ValueError("검토한 파일을 찾을 수 없습니다.")
     if batch.confirmed_at is not None:
-        raise ValueError("Upload batch has already been confirmed.")
+        raise ValueError("이미 저장한 파일입니다.")
+    if batch.invalidated_at is not None:
+        raise ValueError("무효 처리된 파일은 저장할 수 없습니다.")
 
     inserted_count = 0
     skipped_count = 0
@@ -343,3 +394,36 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
         "skipped_count": skipped_count,
         "error_count": error_count,
     }
+
+
+def delete_unconfirmed_upload(db: Session, batch_id: str) -> None:
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None:
+        raise ValueError("검토한 파일을 찾을 수 없습니다.")
+    if batch.confirmed_at is not None:
+        raise ValueError("이미 저장한 파일은 삭제할 수 없습니다. 필요한 경우 무효 처리하세요.")
+    db.delete(batch)
+    db.commit()
+
+
+def invalidate_confirmed_upload(db: Session, batch_id: str, reason: str | None = None) -> None:
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None:
+        raise ValueError("검토한 파일을 찾을 수 없습니다.")
+    if batch.confirmed_at is None:
+        raise ValueError("아직 저장하지 않은 파일은 삭제할 수 있습니다.")
+    if batch.invalidated_at is not None:
+        raise ValueError("이미 무효 처리된 파일입니다.")
+    batch.invalidated_at = now_utc()
+    batch.invalidated_reason = reason or "사용자가 파일 검토 화면에서 무효 처리했습니다."
+    db.commit()
+
+
+def column_mapping_for_batch(batch: UploadBatch) -> dict[str, str]:
+    if not batch.column_mapping_json:
+        return {}
+    try:
+        value = json.loads(batch.column_mapping_json)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}

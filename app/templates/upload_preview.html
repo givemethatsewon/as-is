@@ -3,30 +3,50 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">{{ batch.upload_type }}</p>
-    <h1>업로드 미리보기</h1>
+    <p class="eyebrow">{{ batch.upload_type|upload_type_label }}</p>
+    <h1>저장 전에 검토 결과를 확인하세요</h1>
+    <p class="supporting-copy">신규 행만 저장됩니다. 오류가 있거나 이미 저장된 파일은 저장 버튼을 누를 수 없습니다. 원본 내용을 고쳐야 하면 파일을 수정한 뒤 다시 선택하세요.</p>
   </div>
-  <form action="/upload/confirm" method="post">
-    <input type="hidden" name="batch_id" value="{{ batch.id }}">
-    <button class="button primary" type="submit" {% if batch.error_count > 0 or batch.confirmed_at %}disabled{% endif %}>신규 row 확정</button>
-  </form>
+  <div class="actions">
+    <a class="button" href="/upload">파일 목록으로 가기</a>
+    {% if not batch.confirmed_at %}
+    <form action="/upload/delete" method="post">
+      <input type="hidden" name="batch_id" value="{{ batch.id }}">
+      <button class="button danger" type="submit">이 검토 기록 삭제</button>
+    </form>
+    {% elif not batch.invalidated_at %}
+    <form action="/upload/invalidate" method="post">
+      <input type="hidden" name="batch_id" value="{{ batch.id }}">
+      <button class="button danger" type="submit">저장 자료 무효 처리</button>
+    </form>
+    {% endif %}
+    <form action="/upload/confirm" method="post">
+      <input type="hidden" name="batch_id" value="{{ batch.id }}">
+      <button class="button primary" type="submit" {% if batch.error_count > 0 or batch.confirmed_at or batch.invalidated_at %}disabled{% endif %}>신규 행 저장하기</button>
+    </form>
+  </div>
 </section>
 
+{% if batch.invalidated_at %}
+<p class="notice danger">이 파일은 무효 처리됐습니다. 이미 저장된 자료는 삭제하지 않고 이력만 남겨 둡니다.</p>
+{% endif %}
+
 <section class="metric-grid compact">
-  <article class="metric"><span>전체</span><strong>{{ batch.total_rows }}</strong></article>
-  <article class="metric"><span>신규</span><strong>{{ batch.new_count }}</strong></article>
-  <article class="metric"><span>중복</span><strong>{{ batch.duplicate_count }}</strong></article>
-  <article class="metric caution"><span>충돌</span><strong>{{ batch.conflict_count }}</strong></article>
-  <article class="metric warn"><span>오류</span><strong>{{ batch.error_count }}</strong></article>
+  <article class="metric"><span>파일의 전체 행</span><strong>{{ batch.total_rows }}</strong></article>
+  <article class="metric"><span>새로 저장할 행</span><strong>{{ batch.new_count }}</strong></article>
+  <article class="metric"><span>이미 저장된 행</span><strong>{{ batch.duplicate_count }}</strong></article>
+  <article class="metric caution"><span>기존 데이터와 다른 행</span><strong>{{ batch.conflict_count }}</strong></article>
+  <article class="metric warn"><span>수정이 필요한 오류</span><strong>{{ batch.error_count }}</strong></article>
 </section>
 
 {% if column_mapping %}
 <section class="table-section">
-  <h2>컬럼 매핑</h2>
+  <h2>파일 컬럼 연결 결과</h2>
+  <p class="table-caption">시스템에서 필요한 항목과 업로드한 파일의 컬럼명이 어떻게 연결됐는지 보여줍니다.</p>
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Canonical field</th><th>입력 파일 컬럼</th></tr>
+        <tr><th>시스템 항목</th><th>입력 파일 컬럼</th></tr>
       </thead>
       <tbody>
         {% for canonical, source in column_mapping.items() %}
@@ -45,18 +65,31 @@
 {% endif %}
 
 <section class="table-section">
+  <h2>행별 검토 결과</h2>
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Row</th><th>상태</th><th>메시지</th><th>정규화 데이터</th></tr>
+        <tr><th>행 번호</th><th>검토 결과</th><th>안내</th><th>저장될 데이터</th></tr>
       </thead>
       <tbody>
         {% for row in rows %}
         <tr>
           <td>{{ row.row_number }}</td>
-          <td><span class="status {{ row.row_status }}">{{ row.row_status }}</span></td>
+          <td><span class="status {{ row.row_status }}">{{ row.row_status|display_status }}</span></td>
           <td>{{ row.message }}</td>
-          <td class="payload">{{ row.payload_json }}</td>
+          <td class="payload">
+            <dl class="payload-list">
+              {% for key, value in row.payload_json|payload_items %}
+              <div class="payload-item">
+                <dt>
+                  <span>{{ field_descriptions.get(key, key) }}</span>
+                  {% if field_descriptions.get(key) %}<small>{{ key }}</small>{% endif %}
+                </dt>
+                <dd>{{ value if value is not none else '-' }}</dd>
+              </div>
+              {% endfor %}
+            </dl>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

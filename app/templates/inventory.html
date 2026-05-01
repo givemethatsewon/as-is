@@ -3,37 +3,51 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Lots</p>
-    <h1>재고 조회</h1>
+    <p class="eyebrow">수입 재고</p>
+    <h1>수출에 연결할 수입 재고를 찾으세요</h1>
+    <p class="supporting-copy">품번, 원산지, 상태로 재고를 좁혀 볼 수 있습니다. 남은 수량이 있는 건만 수출 매칭에 사용할 수 있습니다.</p>
   </div>
 </section>
 
 <form class="filterbar" method="get" action="/inventory">
-  <input name="part_number" placeholder="Part Number" value="{{ part_number }}">
-  <input name="origin" placeholder="Origin" value="{{ origin }}">
+  <label>
+    <span class="field-name">품번</span>
+    <input name="part_number" placeholder="예: MTG011114" value="{{ part_number }}">
+  </label>
+  <label>
+    <span class="field-name">원산지</span>
+    <input name="origin" placeholder="예: CN" value="{{ origin }}">
+  </label>
   <select name="status">
     <option value="">전체 상태</option>
     {% for item in ["available", "expiring_soon", "expired", "used_up", "blocked"] %}
-    <option value="{{ item }}" {% if status == item %}selected{% endif %}>{{ item }}</option>
+    <option value="{{ item }}" {% if status == item %}selected{% endif %}>{{ item|display_status }}</option>
     {% endfor %}
   </select>
-  <button class="button primary" type="submit">조회</button>
+  <button class="button primary" type="submit">조건에 맞는 재고 보기</button>
 </form>
 
 <section class="metric-grid compact">
-  <article class="metric"><span>수입</span><strong>{{ summary.total_imported_qty }}</strong></article>
-  <article class="metric"><span>수출</span><strong>{{ summary.total_exported_qty }}</strong></article>
-  <article class="metric"><span>잔량</span><strong>{{ summary.remaining_qty }}</strong></article>
-  <article class="metric"><span>사용 가능</span><strong>{{ summary.available_qty }}</strong></article>
-  <article class="metric warn"><span>만료</span><strong>{{ summary.expired_qty }}</strong></article>
+  <article class="metric"><span>등록된 수입 수량</span><strong>{{ summary.total_imported_qty }}</strong></article>
+  <article class="metric"><span>이미 수출에 연결된 수량</span><strong>{{ summary.total_exported_qty }}</strong></article>
+  <article class="metric"><span>남은 수량</span><strong>{{ summary.remaining_qty }}</strong></article>
+  <article class="metric"><span>지금 사용 가능</span><strong>{{ summary.available_qty }}</strong></article>
+  <article class="metric warn"><span>기한이 지난 수량</span><strong>{{ summary.expired_qty }}</strong></article>
 </section>
 
 <section class="table-section">
+  <h2>수입 재고 목록</h2>
+  <div class="term-list" aria-label="용어 설명">
+    <span class="term"><strong>품번</strong> 제품을 구분하는 부품 번호입니다.</span>
+    <span class="term"><strong>HS 코드</strong> 관세 품목을 구분하는 번호입니다.</span>
+    <span class="term"><strong>수리일</strong> 세관이 수입신고를 받아들인 날짜입니다.</span>
+    <span class="term"><strong>란/행</strong> 수입신고서 안에서 품목이 적힌 위치입니다.</span>
+  </div>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Part Number</th><th>Origin</th><th>HS</th><th>수리일</th><th>신고번호</th><th>란/행</th><th>수입</th><th>사용</th><th>잔량</th><th>상태</th>
+          <th>품번</th><th>원산지</th><th>HS 코드</th><th>수리일</th><th>수입신고번호</th><th>란/행</th><th>수입 수량</th><th>사용 수량</th><th>남은 수량</th><th>상태</th>
         </tr>
       </thead>
       <tbody>
@@ -48,14 +62,13 @@
           <td>{{ lot.import_qty }}</td>
           <td>{{ lot.used_qty }}</td>
           <td>{{ lot.remaining_qty }}</td>
-          <td><span class="status {{ lot.status }}">{{ lot.status }}</span></td>
+          <td><span class="status {{ lot.status }}">{{ lot.status|display_status }}</span></td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="empty">조회 결과가 없습니다.</td></tr>
+        <tr><td colspan="10" class="empty">조건에 맞는 재고가 없습니다. 품번, 원산지, 상태 조건을 다시 확인하세요.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 {% endblock %}
-

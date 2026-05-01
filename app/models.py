@@ -100,7 +100,10 @@ class UploadBatch(Base):
     duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     conflict_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    column_mapping_json: Mapped[str | None] = mapped_column(Text)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invalidated_reason: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
 
     rows: Mapped[list[UploadPreviewRow]] = relationship(back_populates="batch", cascade="all, delete-orphan")

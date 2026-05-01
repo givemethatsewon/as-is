@@ -1,7 +1,7 @@
 from collections.abc import Generator
 from os import getenv
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -28,4 +28,24 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_upload_batch_columns()
 
+
+def _ensure_upload_batch_columns() -> None:
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    inspector = inspect(engine)
+    existing = {column["name"] for column in inspector.get_columns("upload_batches")}
+    columns = {
+        "column_mapping_json": "TEXT",
+        "invalidated_at": "DATETIME",
+        "invalidated_reason": "VARCHAR(255)",
+    }
+    missing = [(name, column_type) for name, column_type in columns.items() if name not in existing]
+    if not missing:
+        return
+
+    with engine.begin() as connection:
+        for name, column_type in missing:
+            connection.execute(text(f"ALTER TABLE upload_batches ADD COLUMN {name} {column_type}"))

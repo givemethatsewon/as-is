@@ -3,21 +3,60 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Downloads</p>
-    <h1>리포트</h1>
+    <p class="eyebrow">다운로드</p>
+    <h1>다운로드 전에 자료를 확인하세요</h1>
+    <p class="supporting-copy">엑셀 파일에는 수입신고별 잔량과 수출건별 수입근거 매칭 결과가 함께 들어갑니다.</p>
   </div>
   <div class="actions">
-    <a class="button" href="/api/reports/export-allocations.csv">CSV</a>
-    <a class="button primary" href="/api/reports/download.xlsx">XLSX</a>
+    <a class="button" href="/api/reports/export-allocations.csv">매칭 결과 CSV로 내려받기</a>
+    <a class="button primary" href="/api/reports/download.xlsx">전체 엑셀 파일로 내려받기</a>
   </div>
 </section>
 
 <section class="table-section">
+  <h2>수입신고별 잔량</h2>
+  <p class="table-caption">수입신고 란/행별로 수입 수량, 사용 수량, 남은 수량을 확인합니다. 엑셀의 첫 번째 시트와 같은 기준입니다.</p>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>수출일</th><th>Part Number</th><th>필요</th><th>매칭</th><th>수입신고번호</th><th>수리일</th><th>Origin</th><th>HS</th><th>란/행</th><th>잔량</th><th>상태</th><th>환급예상</th>
+          <th>수입신고번호</th><th>수리일</th><th>원산지</th><th>HS 코드</th><th>수입 란/행</th><th>품번</th><th>규격/품명</th><th>수입 수량</th><th>사용 수량</th><th>남은 수량</th><th>수량 단위</th><th>상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in import_lots %}
+        <tr>
+          <td>{{ row.import_declaration_no }}</td>
+          <td>{{ row.import_accepted_date }}</td>
+          <td>{{ row.origin }}</td>
+          <td>{{ row.hs_code }}</td>
+          <td>{{ row.line_no }}/{{ row.row_no }}</td>
+          <td>{{ row.part_number }}</td>
+          <td>{{ row.spec or '' }}</td>
+          <td>{{ row.import_qty }}</td>
+          <td>{{ row.used_qty }}</td>
+          <td>{{ row.remaining_qty }}</td>
+          <td>{{ row.qty_unit or '' }}</td>
+          <td>{{ row.status }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="12" class="empty">아직 수입 재고가 없습니다. 파일 검토에서 수입 데이터를 먼저 저장하세요.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="table-section">
+  <h2>수출건별 수입근거 매칭 결과</h2>
+  <div class="term-list" aria-label="용어 설명">
+    <span class="term"><strong>환급예상</strong> 현재 매칭 기준으로 계산된 예상 금액입니다. 최종 신고 금액과 다를 수 있습니다.</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>수출일</th><th>품번</th><th>필요 수량</th><th>매칭 수량</th><th>수입신고번호</th><th>수입수리일</th><th>원산지</th><th>HS 코드</th><th>수입 란/행</th><th>매칭 후 잔량</th><th>매칭 상태</th><th>환급예상</th>
         </tr>
       </thead>
       <tbody>
@@ -33,15 +72,14 @@
           <td>{{ row.hs_code }}</td>
           <td>{{ row.line_no }}/{{ row.row_no }}</td>
           <td>{{ row.remaining_qty_after }}</td>
-          <td><span class="status {{ row.match_status }}">{{ row.match_status }}</span></td>
+          <td><span class="status {{ row.match_status }}">{{ row.match_status|display_status }}</span></td>
           <td>{{ row.expected_refund_amount or '' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="empty">매칭 결과가 없습니다.</td></tr>
+        <tr><td colspan="12" class="empty">아직 내려받을 매칭 결과가 없습니다. 수출 매칭을 먼저 실행하세요.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 {% endblock %}
-

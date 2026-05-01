@@ -119,9 +119,9 @@ def _preview_response(batch: UploadBatch, warnings: list[str], column_mapping: d
 def _confirm(batch_id: str, expected_type: str, db: Session) -> dict[str, object]:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise HTTPException(status_code=404, detail="Upload batch not found.")
+        raise HTTPException(status_code=404, detail="검토한 파일을 찾을 수 없습니다.")
     if batch.upload_type != expected_type:
-        raise HTTPException(status_code=400, detail=f"Batch is for {batch.upload_type}, not {expected_type}.")
+        raise HTTPException(status_code=400, detail=f"이 파일은 {expected_type}용이 아닙니다.")
     try:
         return confirm_batch(db, batch_id)
     except ValueError as exc:

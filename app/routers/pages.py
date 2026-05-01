@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
@@ -11,9 +12,17 @@ from app.db import get_db
 from app.models import ExportRequirement, UploadBatch
 from app.services.matching import run_matching
 from app.services.parsing import ParseError, read_upload_rows
-from app.services.reports import allocation_rows
-from app.services.summaries import dashboard_summary, inventory_summary
-from app.services.uploads import CANONICAL_FIELD_DESCRIPTIONS, confirm_batch, preview_exports, preview_imports
+from app.services.reports import allocation_rows, import_lot_rows
+from app.services.summaries import dashboard_insights, dashboard_summary, inventory_summary
+from app.services.uploads import (
+    CANONICAL_FIELD_DESCRIPTIONS,
+    column_mapping_for_batch,
+    confirm_batch,
+    delete_unconfirmed_upload,
+    invalidate_confirmed_upload,
+    preview_exports,
+    preview_imports,
+)
 from app.templating import templates
 
 router = APIRouter()
@@ -29,7 +38,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"summary": dashboard_summary(db), "active": "dashboard"},
+        {"summary": dashboard_summary(db), "insights": dashboard_insights(db), "active": "dashboard"},
     )
 
 
@@ -73,14 +82,40 @@ async def export_preview_page(request: Request, file: UploadFile = File(...), db
     return _preview_template(request, result.batch, result.column_mapping)
 
 
+@router.get("/upload/reviews/{batch_id}")
+def upload_review_detail_page(request: Request, batch_id: str, db: Session = Depends(get_db)):
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="검토한 파일을 찾을 수 없습니다.")
+    return _preview_template(request, batch, column_mapping_for_batch(batch))
+
+
 @router.post("/upload/confirm")
 def confirm_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db)):
     try:
         result = confirm_batch(db, batch_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    message = f"Inserted {result['inserted_count']} rows. Skipped {result['skipped_count']} rows."
-    return RedirectResponse(url=f"/upload?message={message}", status_code=303)
+    message = f"신규 행 {result['inserted_count']}개를 저장했고, {result['skipped_count']}개는 건너뛰었습니다."
+    return _upload_redirect(message)
+
+
+@router.post("/upload/delete")
+def delete_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db)):
+    try:
+        delete_unconfirmed_upload(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _upload_redirect("미확정 파일 검토 기록을 삭제했습니다.")
+
+
+@router.post("/upload/invalidate")
+def invalidate_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db)):
+    try:
+        invalidate_confirmed_upload(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _upload_redirect("저장된 파일을 무효 처리했습니다. 이미 저장된 자료는 삭제하지 않고 이력만 남깁니다.")
 
 
 @router.get("/inventory")
@@ -128,8 +163,8 @@ def run_matching_page(
     summary = run_matching(db, export_date)
     exports = db.scalars(select(ExportRequirement).order_by(ExportRequirement.export_date.desc())).all()
     message = (
-        f"Matched {summary.matched_count}, partial {summary.partial_matched_count}, "
-        f"insufficient {summary.insufficient_stock_count}, allocations {summary.allocation_count}."
+        f"매칭 완료 {summary.matched_count}건, 일부 매칭 {summary.partial_matched_count}건, "
+        f"재고 부족 {summary.insufficient_stock_count}건입니다. 수입 재고 연결은 {summary.allocation_count}건 생성됐습니다."
     )
     return templates.TemplateResponse(
         request,
@@ -140,11 +175,12 @@ def run_matching_page(
 
 @router.get("/reports")
 def reports_page(request: Request, db: Session = Depends(get_db)):
-    rows = allocation_rows(db)
+    allocation_preview = allocation_rows(db)
+    import_lot_preview = import_lot_rows(db)
     return templates.TemplateResponse(
         request,
         "reports.html",
-        {"active": "reports", "allocations": rows},
+        {"active": "reports", "allocations": allocation_preview, "import_lots": import_lot_preview},
     )
 
 
@@ -160,3 +196,7 @@ def _preview_template(request: Request, batch: UploadBatch, column_mapping: dict
             "field_descriptions": CANONICAL_FIELD_DESCRIPTIONS,
         },
     )
+
+
+def _upload_redirect(message: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/upload?{urlencode({'message': message})}", status_code=303)

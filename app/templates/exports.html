@@ -3,23 +3,26 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">FIFO Matching</p>
-    <h1>수출매칭</h1>
+    <p class="eyebrow">수출 매칭</p>
+    <h1>수출 요청을 수입 재고와 연결하세요</h1>
+    <p class="supporting-copy">날짜를 비우면 아직 매칭되지 않은 모든 수출 요청을 처리합니다. 날짜를 선택하면 해당 수출일만 처리합니다.</p>
   </div>
   <form class="inline-form" action="/exports/matching/run" method="post">
     <input type="date" name="export_date">
-    <button class="button primary" type="submit">자동 매칭 실행</button>
+    <button class="button primary" type="submit">선택한 조건으로 매칭하기</button>
   </form>
 </section>
 
 {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
 
 <section class="table-section">
+  <h2>수출 요청 목록</h2>
+  <p class="table-caption">FIFO는 먼저 수입된 재고부터 사용하는 방식입니다. 같은 품번과 원산지를 기준으로 남은 수입 재고를 연결합니다.</p>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>수출일</th><th>Part Number</th><th>Origin</th><th>필요수량</th><th>설명</th><th>단가</th><th>금액</th><th>상태</th>
+          <th>수출일</th><th>품번</th><th>원산지</th><th>필요 수량</th><th>설명</th><th>단가</th><th>금액</th><th>매칭 상태</th>
         </tr>
       </thead>
       <tbody>
@@ -32,14 +35,13 @@
           <td>{{ export.description or '' }}</td>
           <td>{{ export.unit_price or '' }}</td>
           <td>{{ export.amount or '' }}</td>
-          <td><span class="status {{ export.status }}">{{ export.status }}</span></td>
+          <td><span class="status {{ export.status }}">{{ export.status|display_status }}</span></td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="empty">수출 요청 데이터가 없습니다.</td></tr>
+        <tr><td colspan="8" class="empty">아직 수출 요청 데이터가 없습니다. 파일 검토에서 수출 요청을 먼저 저장하세요.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 {% endblock %}
-

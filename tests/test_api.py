@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from io import BytesIO
+
+from openpyxl import load_workbook
+
 
 def test_upload_confirm_match_and_download_reports(client):
     import_csv = (
@@ -49,6 +53,23 @@ def test_upload_confirm_match_and_download_reports(client):
     assert xlsx_response.status_code == 200
     assert xlsx_response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert xlsx_response.content.startswith(b"PK")
+
+    workbook = load_workbook(BytesIO(xlsx_response.content))
+    assert "수입신고별 잔량" in workbook.sheetnames
+    sheet = workbook["수출건별 수입근거 매칭"]
+    assert sheet["A1"].value == "수출일"
+    assert sheet["A1"].font.bold
+    assert sheet["A1"].fill.fgColor.rgb == "000F5F50"
+    assert sheet.freeze_panes == "A2"
+    assert sheet.auto_filter.ref == sheet.dimensions
+    headers = [cell.value for cell in sheet[1]]
+    match_status_column = headers.index("매칭 상태") + 1
+    assert sheet.cell(row=2, column=match_status_column).value == "매칭 완료"
+    assert "수출신고번호" not in headers
+    assert "수출수리일" not in headers
+    assert "수출 란번호" not in headers
+    assert "수입 란번호" in headers
+    assert "수입 행번호" in headers
 
 
 def test_import_preview_supports_column_aliases(client):
@@ -118,3 +139,75 @@ def test_import_preview_page_shows_canonical_field_descriptions(client):
     assert "import_accepted_date" in response.text
     assert "수입신고 수리일" in response.text
     assert "품번 / Part Number" in response.text
+
+
+def test_upload_review_detail_delete_and_invalidate_workflow(client):
+    import_csv = (
+        "import_declaration_no,declaration_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,1256,PC\n"
+    )
+
+    preview = client.post(
+        "/api/imports/preview",
+        files={"file": ("imports.csv", import_csv, "text/csv")},
+    )
+    batch_id = preview.json()["batch_id"]
+
+    detail = client.get(f"/upload/reviews/{batch_id}")
+    assert detail.status_code == 200
+    assert "행별 검토 결과" in detail.text
+    assert "파일 컬럼 연결 결과" in detail.text
+
+    upload_page = client.get("/upload")
+    assert "상세 보기" in upload_page.text
+    assert "삭제" in upload_page.text
+    assert "파일 다시 선택" in upload_page.text
+    assert "배치" not in upload_page.text
+
+    delete = client.post("/upload/delete", data={"batch_id": batch_id}, follow_redirects=False)
+    assert delete.status_code == 303
+    assert client.get(f"/upload/reviews/{batch_id}").status_code == 404
+
+    second_preview = client.post(
+        "/api/imports/preview",
+        files={"file": ("imports.csv", import_csv, "text/csv")},
+    )
+    confirmed_batch_id = second_preview.json()["batch_id"]
+    assert client.post("/api/imports/confirm", data={"batch_id": confirmed_batch_id}).status_code == 200
+
+    delete_confirmed = client.post("/upload/delete", data={"batch_id": confirmed_batch_id})
+    assert delete_confirmed.status_code == 400
+    assert "무효 처리" in delete_confirmed.text
+
+    invalidate = client.post("/upload/invalidate", data={"batch_id": confirmed_batch_id}, follow_redirects=True)
+    assert invalidate.status_code == 200
+    assert "무효 처리" in invalidate.text
+
+    detail_after_invalidate = client.get(f"/upload/reviews/{confirmed_batch_id}")
+    assert "이 파일은 무효 처리됐습니다" in detail_after_invalidate.text
+
+
+def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
+    response = client.get("/reports")
+
+    assert response.status_code == 200
+    assert "다운로드 전에 자료를 확인하세요" in response.text
+    assert "수입신고별 잔량" in response.text
+    assert "수출건별 수입근거 매칭 결과" in response.text
+    assert "매칭 결과 CSV로 내려받기" in response.text
+    assert "전체 엑셀 파일로 내려받기" in response.text
+    assert "환급예상" in response.text
+    assert "최종 신고 금액과 다를 수 있습니다" in response.text
+    assert "아직 수입 재고가 없습니다" in response.text
+    assert "아직 내려받을 매칭 결과가 없습니다" in response.text
+
+
+def test_inventory_page_translates_status_filter_labels(client):
+    response = client.get("/inventory")
+
+    assert response.status_code == 200
+    assert "조건에 맞는 재고 보기" in response.text
+    assert "사용 가능" in response.text
+    assert "만료 예정" in response.text
+    assert "수리일" in response.text
+    assert "세관이 수입신고를 받아들인 날짜" in response.text
