@@ -6,6 +6,7 @@ class UploadPreviewResponse(BaseModel):
     uploaded_count: int
     error_count: int
     warnings: list[str]
+    column_mapping: dict[str, str]
     new_count: int
     duplicate_count: int
     conflict_count: int
@@ -23,4 +24,3 @@ class MatchingRunResponse(BaseModel):
     partial_matched_count: int
     insufficient_stock_count: int
     allocation_count: int
-

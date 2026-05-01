@@ -13,7 +13,7 @@ from app.services.matching import run_matching
 from app.services.parsing import ParseError, read_upload_rows
 from app.services.reports import allocation_rows
 from app.services.summaries import dashboard_summary, inventory_summary
-from app.services.uploads import confirm_batch, preview_exports, preview_imports
+from app.services.uploads import CANONICAL_FIELD_DESCRIPTIONS, confirm_batch, preview_exports, preview_imports
 from app.templating import templates
 
 router = APIRouter()
@@ -55,7 +55,7 @@ async def import_preview_page(request: Request, file: UploadFile = File(...), db
             {"active": "upload", "error": str(exc), "batches": []},
             status_code=400,
         )
-    return _preview_template(request, result.batch)
+    return _preview_template(request, result.batch, result.column_mapping)
 
 
 @router.post("/upload/exports/preview")
@@ -70,7 +70,7 @@ async def export_preview_page(request: Request, file: UploadFile = File(...), db
             {"active": "upload", "error": str(exc), "batches": []},
             status_code=400,
         )
-    return _preview_template(request, result.batch)
+    return _preview_template(request, result.batch, result.column_mapping)
 
 
 @router.post("/upload/confirm")
@@ -148,10 +148,15 @@ def reports_page(request: Request, db: Session = Depends(get_db)):
     )
 
 
-def _preview_template(request: Request, batch: UploadBatch):
+def _preview_template(request: Request, batch: UploadBatch, column_mapping: dict[str, str]):
     return templates.TemplateResponse(
         request,
         "upload_preview.html",
-        {"active": "upload", "batch": batch, "rows": batch.rows},
+        {
+            "active": "upload",
+            "batch": batch,
+            "rows": batch.rows,
+            "column_mapping": column_mapping,
+            "field_descriptions": CANONICAL_FIELD_DESCRIPTIONS,
+        },
     )
-

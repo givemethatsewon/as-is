@@ -26,7 +26,7 @@ async def api_preview_imports(file: UploadFile = File(...), db: Session = Depend
         result = preview_imports(db, rows, file.filename or "upload")
     except (ParseError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _preview_response(result.batch, result.warnings)
+    return _preview_response(result.batch, result.warnings, result.column_mapping)
 
 
 @router.post("/imports/confirm", response_model=UploadConfirmResponse)
@@ -41,7 +41,7 @@ async def api_preview_exports(file: UploadFile = File(...), db: Session = Depend
         result = preview_exports(db, rows, file.filename or "upload")
     except (ParseError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _preview_response(result.batch, result.warnings)
+    return _preview_response(result.batch, result.warnings, result.column_mapping)
 
 
 @router.post("/exports/confirm", response_model=UploadConfirmResponse)
@@ -103,12 +103,13 @@ def api_report_xlsx(db: Session = Depends(get_db)):
     )
 
 
-def _preview_response(batch: UploadBatch, warnings: list[str]) -> dict[str, object]:
+def _preview_response(batch: UploadBatch, warnings: list[str], column_mapping: dict[str, str]) -> dict[str, object]:
     return {
         "batch_id": batch.id,
         "uploaded_count": batch.total_rows,
         "error_count": batch.error_count,
         "warnings": warnings,
+        "column_mapping": column_mapping,
         "new_count": batch.new_count,
         "duplicate_count": batch.duplicate_count,
         "conflict_count": batch.conflict_count,
@@ -125,4 +126,3 @@ def _confirm(batch_id: str, expected_type: str, db: Session) -> dict[str, object
         return confirm_batch(db, batch_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
