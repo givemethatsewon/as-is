@@ -1,0 +1,18 @@
+services:
+  as-is:
+    build: .
+    container_name: as-is
+    environment:
+      DATABASE_URL: sqlite:////data/as_is.db
+    volumes:
+      - as_is_data:/data
+    networks:
+      - proxy-net
+    restart: unless-stopped
+
+networks:
+  proxy-net:
+    external: true
+
+volumes:
+  as_is_data:
