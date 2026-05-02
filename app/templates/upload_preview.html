@@ -1,54 +1,53 @@
 {% extends "base.html" %}
-{% block title %}업로드 미리보기 · As-Is{% endblock %}
+{% block title %}검토 결과 · As-Is{% endblock %}
 {% block content %}
 <section class="page-head">
   <div>
     <p class="eyebrow">{{ batch.upload_type|upload_type_label }}</p>
-    <h1>저장 전에 검토 결과를 확인하세요</h1>
-    <p class="supporting-copy">신규 행만 저장됩니다. 오류가 있거나 이미 저장된 파일은 저장 버튼을 누를 수 없습니다. 원본 내용을 고쳐야 하면 파일을 수정한 뒤 다시 선택하세요.</p>
+    <h1>검토 결과</h1>
+    <p class="supporting-copy">저장 전 파일 내용을 확인하세요.</p>
   </div>
   <div class="actions">
-    <a class="button" href="/upload">파일 목록으로 가기</a>
+    <a class="button" href="/upload">목록으로</a>
     {% if not batch.confirmed_at %}
     <form action="/upload/delete" method="post">
       <input type="hidden" name="batch_id" value="{{ batch.id }}">
-      <button class="button danger" type="submit">이 검토 기록 삭제</button>
+      <button class="button danger" type="submit">삭제</button>
     </form>
     {% elif not batch.invalidated_at %}
     <form action="/upload/invalidate" method="post">
       <input type="hidden" name="batch_id" value="{{ batch.id }}">
       <input type="text" name="reason" placeholder="무효 처리 사유" aria-label="무효 처리 사유">
-      <button class="button danger" type="submit">저장 자료 무효 처리</button>
+      <button class="button danger" type="submit">무효 처리</button>
     </form>
     {% endif %}
     <form action="/upload/confirm" method="post">
       <input type="hidden" name="batch_id" value="{{ batch.id }}">
-      <button class="button primary" type="submit" {% if batch.error_count > 0 or batch.confirmed_at or batch.invalidated_at %}disabled{% endif %}>신규 행 저장하기</button>
+      <button class="button primary" type="submit" {% if batch.error_count > 0 or batch.confirmed_at or batch.invalidated_at %}disabled{% endif %}>저장</button>
     </form>
   </div>
 </section>
 
 {% if batch.invalidated_at %}
-<p class="notice danger">이 파일은 무효 처리됐습니다. 이 업로드에서 저장된 자료는 이후 대시보드, 재고, 매칭, 리포트 집계에서 제외됩니다. 사유: {{ batch.invalidated_reason or '사유 없음' }} / 처리 시각: {{ batch.invalidated_at }}</p>
+<p class="notice danger">무효 처리된 파일입니다. 사유: {{ batch.invalidated_reason or '사유 없음' }} / 처리 시각: {{ batch.invalidated_at }}</p>
 {% endif %}
 
-<section class="table-section compact-note">
-  <h2>삭제, 저장, 무효 처리 차이</h2>
-  <p class="table-caption">삭제는 저장 전 미리보기 기록만 없애는 작업입니다. 저장은 신규 행을 본 데이터로 반영합니다. 무효 처리는 저장 완료 업로드를 이력으로 남기되, 해당 업로드에서 생성된 본 데이터를 이후 계산과 다운로드에서 제외합니다.</p>
-</section>
+{% if batch.error_count > 0 %}
+<p class="notice danger">오류가 있으면 저장할 수 없습니다.</p>
+{% endif %}
 
 <section class="metric-grid compact">
-  <article class="metric"><span>파일의 전체 행</span><strong>{{ batch.total_rows }}</strong></article>
-  <article class="metric"><span>새로 저장할 행</span><strong>{{ batch.new_count }}</strong></article>
-  <article class="metric"><span>이미 저장된 행</span><strong>{{ batch.duplicate_count }}</strong></article>
-  <article class="metric caution"><span>기존 데이터와 다른 행</span><strong>{{ batch.conflict_count }}</strong></article>
-  <article class="metric warn"><span>수정이 필요한 오류</span><strong>{{ batch.error_count }}</strong></article>
+  <article class="metric"><span>전체 행</span><strong>{{ batch.total_rows }}</strong></article>
+  <article class="metric"><span>신규</span><strong>{{ batch.new_count }}</strong></article>
+  <article class="metric"><span>중복</span><strong>{{ batch.duplicate_count }}</strong></article>
+  <article class="metric caution"><span>충돌</span><strong>{{ batch.conflict_count }}</strong></article>
+  <article class="metric warn"><span>오류</span><strong>{{ batch.error_count }}</strong></article>
 </section>
 
 {% if column_mapping %}
 <section class="table-section">
-  <h2>파일 컬럼 연결 결과</h2>
-  <p class="table-caption">시스템에서 필요한 항목과 업로드한 파일의 컬럼명이 어떻게 연결됐는지 보여줍니다.</p>
+  <h2>컬럼 연결</h2>
+  <p class="table-caption">업로드한 컬럼이 어떤 항목으로 인식됐는지 보여줍니다.</p>
   <div class="table-wrap">
     <table>
       <thead>
@@ -71,11 +70,11 @@
 {% endif %}
 
 <section class="table-section">
-  <h2>행별 검토 결과</h2>
+  <h2>행별 결과</h2>
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>행 번호</th><th>검토 결과</th><th>안내</th><th>저장될 데이터</th></tr>
+        <tr><th>행</th><th>상태</th><th>안내</th><th>저장 데이터</th></tr>
       </thead>
       <tbody>
         {% for row in rows %}

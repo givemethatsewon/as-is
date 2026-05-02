@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}수출매칭 · As-Is{% endblock %}
+{% block title %}수출 매칭 · As-Is{% endblock %}
 {% block content %}
 <section class="page-head">
   <div>
     <p class="eyebrow">수출 매칭</p>
-    <h1>수출 요청을 수입 재고와 연결하세요</h1>
-    <p class="supporting-copy">날짜를 비우면 아직 매칭되지 않은 모든 수출 요청을 처리합니다. 날짜를 선택하면 해당 수출일만 처리합니다.</p>
+    <h1>수출 매칭</h1>
+    <p class="supporting-copy">수출 요청을 수입 재고와 자동으로 연결합니다.</p>
   </div>
   <form class="inline-form" action="/exports/matching/run" method="post">
     <input type="date" name="export_date">
-    <button class="button primary" type="submit">선택한 조건으로 매칭하기</button>
+    <button class="button primary" type="submit">매칭 실행</button>
   </form>
 </section>
 
@@ -17,7 +17,7 @@
 
 <section class="table-section">
   <h2>현재 매칭 기준</h2>
-  <p class="table-caption">매칭 엔진은 아래 조건을 순서대로 적용합니다.</p>
+  <p class="table-caption">날짜를 선택하면 해당 수출일만 처리합니다.</p>
   <div class="term-list" aria-label="현재 매칭 기준">
     {% for rule in matching_rules %}
     <span class="term">{{ rule }}</span>
@@ -27,12 +27,12 @@
 
 <section class="table-section">
   <h2>수출 요청 목록</h2>
-  <p class="table-caption">무효 처리된 업로드에서 저장된 수출 요청은 목록과 매칭 대상에서 제외됩니다.</p>
+  <p class="table-caption">품번과 원산지가 같은 재고부터 순서대로 매칭합니다.</p>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>수출일</th><th>품번</th><th>원산지</th><th>필요 수량</th><th>설명</th><th>단가</th><th>금액</th><th>매칭 상태</th>
+          <th>수출일</th><th>품번</th><th>원산지</th><th>필요 수량</th><th>설명</th><th>단가</th><th>금액</th><th>상태</th>
         </tr>
       </thead>
       <tbody>
@@ -48,7 +48,7 @@
           <td><span class="status {{ export.status }}">{{ export.status|display_status }}</span></td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="empty">아직 수출 요청 데이터가 없습니다. 파일 검토에서 수출 요청을 먼저 저장하세요.</td></tr>
+        <tr><td colspan="8" class="empty">수출 요청이 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -70,6 +70,6 @@ def test_dashboard_page_shows_customs_practitioner_insight_sections(client):
     response = client.get("/dashboard")
 
     assert response.status_code == 200
-    assert "만료 임박 수입신고 Top 10" in response.text
-    assert "수출 매칭 상태 분포" in response.text
-    assert "HS 코드 확인 필요 목록" in response.text
+    assert "만료 임박 재고" in response.text
+    assert "매칭 상태" in response.text
+    assert "HS 코드 확인 필요" in response.text

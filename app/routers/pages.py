@@ -96,7 +96,7 @@ def confirm_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db)
         result = confirm_batch(db, batch_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    message = f"신규 행 {result['inserted_count']}개를 저장했고, {result['skipped_count']}개는 건너뛰었습니다."
+    message = f"저장 완료 {result['inserted_count']}건, 건너뜀 {result['skipped_count']}건"
     return _upload_redirect(message)
 
 
@@ -106,7 +106,7 @@ def delete_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db))
         delete_unconfirmed_upload(db, batch_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _upload_redirect("미확정 파일 검토 기록을 삭제했습니다.")
+    return _upload_redirect("삭제했습니다.")
 
 
 @router.post("/upload/invalidate")
@@ -115,7 +115,7 @@ def invalidate_upload_page(batch_id: str = Form(...), reason: str | None = Form(
         invalidate_confirmed_upload(db, batch_id, reason)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _upload_redirect("저장된 파일을 무효 처리했습니다. 이 업로드에서 저장된 자료는 이후 집계와 매칭에서 제외됩니다.")
+    return _upload_redirect("무효 처리했습니다.")
 
 
 @router.get("/inventory")
@@ -174,7 +174,7 @@ def run_matching_page(
     ).all()
     message = (
         f"매칭 완료 {summary.matched_count}건, 일부 매칭 {summary.partial_matched_count}건, "
-        f"재고 부족 {summary.insufficient_stock_count}건입니다. 수입 재고 연결은 {summary.allocation_count}건 생성됐습니다."
+        f"재고 부족 {summary.insufficient_stock_count}건"
     )
     return templates.TemplateResponse(
         request,

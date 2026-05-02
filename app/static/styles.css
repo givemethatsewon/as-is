@@ -583,6 +583,20 @@ th {
   padding: 14px 18px 0;
 }
 
+.term-details {
+  padding: 12px 18px 0;
+}
+
+.term-details summary {
+  color: var(--accent-dark);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.term-details .term-list {
+  padding: 10px 0 0;
+}
+
 .term {
   display: inline-flex;
   gap: 6px;
