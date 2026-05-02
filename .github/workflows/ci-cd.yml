@@ -67,3 +67,57 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy over SSH
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      CLOUDFLARED_SERVICE_TOKEN_ID: ${{ secrets.CLOUDFLARED_SERVICE_TOKEN_ID }}
+      CLOUDFLARED_SERVICE_TOKEN_SECRET: ${{ secrets.CLOUDFLARED_SERVICE_TOKEN_SECRET }}
+    steps:
+      - name: Validate deployment secrets
+        run: |
+          missing=0
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS DEPLOY_PATH; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name secret is required for deployment"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Install cloudflared
+        run: |
+          curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i /tmp/cloudflared.deb
+
+      - name: Pull latest code and restart Docker Compose
+        run: |
+          port="${DEPLOY_PORT:-22}"
+          proxy_command="cloudflared access ssh --hostname %h"
+          if [ -n "$CLOUDFLARED_SERVICE_TOKEN_ID" ] && [ -n "$CLOUDFLARED_SERVICE_TOKEN_SECRET" ]; then
+            proxy_command="$proxy_command --service-token-id $CLOUDFLARED_SERVICE_TOKEN_ID --service-token-secret $CLOUDFLARED_SERVICE_TOKEN_SECRET"
+          fi
+          ssh -i ~/.ssh/deploy_key -p "$port" "$DEPLOY_USER@$DEPLOY_HOST" \
+            -o "ProxyCommand=$proxy_command" \
+            "set -euo pipefail; cd '$DEPLOY_PATH'; git fetch origin main; git reset --hard origin/main; docker compose up -d --build"

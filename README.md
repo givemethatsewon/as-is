@@ -45,13 +45,17 @@ GitHub Actions 워크플로는 `.github/workflows/ci-cd.yml`에 있습니다.
 
 - Pull request: Python 3.12로 테스트를 실행합니다.
 - `main` push 또는 수동 실행: 테스트 통과 후 Docker 이미지를 `ghcr.io/givemethatsewon/as-is:latest`와 커밋 SHA 태그로 발행합니다.
+- 배포 Secret이 설정되어 있으면 SSH로 서버에 접속해 `origin/main`을 받은 뒤 `docker compose up -d --build`를 실행합니다.
 
-원격 서버에서 갱신할 때는 아래처럼 GHCR 이미지를 받거나, 현재 `docker-compose.yml`을 서버에서 다시 빌드해 실행합니다.
+필요한 GitHub Actions Secret:
 
-```bash
-docker pull ghcr.io/givemethatsewon/as-is:latest
-docker compose up -d
-```
+- `DEPLOY_HOST`: 서버 주소
+- `DEPLOY_USER`: SSH 사용자
+- `DEPLOY_SSH_KEY`: 배포용 private key
+- `DEPLOY_KNOWN_HOSTS`: 서버 host key. 로컬에서 `ssh-keyscan -H 서버주소`로 확인한 값을 사용합니다.
+- `DEPLOY_PATH`: 서버 안의 저장소 경로
+- `DEPLOY_PORT`: SSH 포트. 생략하면 `22`를 사용합니다.
+- `CLOUDFLARED_SERVICE_TOKEN_ID`, `CLOUDFLARED_SERVICE_TOKEN_SECRET`: Cloudflare Access가 서비스 토큰을 요구하는 경우에만 설정합니다.
 
 ## 삭제, 저장, 무효 처리
 
