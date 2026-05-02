@@ -1,8 +1,11 @@
 .git
+.github
 .pytest_cache
 .venv
 __pycache__
 *.pyc
 *.pyo
-*.egg-info
-as_is.db
+*.db
+.DS_Store
+tests
+samples

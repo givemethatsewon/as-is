@@ -7,10 +7,18 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import ExportAllocation, ExportRequirement, ImportLot
+from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch
 
 
 MATCHABLE_EXPORT_STATUSES = {"pending", "partial_matched", "insufficient_stock"}
+MATCHING_RULES_KO = [
+    "품번 동일",
+    "원산지 동일",
+    "수입 수리일 기준 360일 이내",
+    "잔량 > 0",
+    "FIFO: 오래된 수입 건부터 차감",
+    "HS 코드가 다르면 매칭은 진행하고 경고를 남깁니다.",
+]
 
 
 @dataclass(frozen=True)
@@ -41,7 +49,9 @@ def update_lot_status(lot: ImportLot, reference_date: date | None = None) -> Non
 def run_matching(db: Session, export_date: date | None = None) -> MatchingSummary:
     stmt = (
         select(ExportRequirement)
+        .outerjoin(UploadBatch, ExportRequirement.upload_batch_id == UploadBatch.id)
         .where(ExportRequirement.status.in_(MATCHABLE_EXPORT_STATUSES))
+        .where((ExportRequirement.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
         .order_by(ExportRequirement.export_date, ExportRequirement.part_number, ExportRequirement.origin, ExportRequirement.id)
     )
     if export_date is not None:
@@ -87,11 +97,14 @@ def allocate_export(db: Session, export: ExportRequirement) -> int:
     candidates = list(
         db.scalars(
             select(ImportLot)
+            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
             .where(
+                # 공모전 핵심 조건: 품번 동일 + 원산지 동일 + 360일 이내 후보 중 잔량이 있는 건만 FIFO로 차감합니다.
                 ImportLot.part_number == export.part_number,
                 ImportLot.origin == export.origin,
                 ImportLot.remaining_qty > 0,
                 ImportLot.import_accepted_date <= export.export_date,
+                (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
             )
             .order_by(
                 ImportLot.import_accepted_date.asc(),
@@ -150,11 +163,14 @@ def allocate_export(db: Session, export: ExportRequirement) -> int:
 
 def mark_expired_lots(db: Session, export: ExportRequirement) -> None:
     lots = db.scalars(
-        select(ImportLot).where(
+        select(ImportLot)
+        .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+        .where(
             ImportLot.part_number == export.part_number,
             ImportLot.origin == export.origin,
             ImportLot.remaining_qty > 0,
             ImportLot.import_accepted_date <= export.export_date,
+            (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
         )
     )
     for lot in lots:
@@ -165,4 +181,3 @@ def _expected_refund(matched_qty: int, duty_per_unit: Decimal | None) -> Decimal
     if duty_per_unit is None:
         return None
     return duty_per_unit * matched_qty
-

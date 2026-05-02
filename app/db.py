@@ -29,6 +29,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_upload_batch_columns()
+    _ensure_batch_owner_columns()
 
 
 def _ensure_upload_batch_columns() -> None:
@@ -49,3 +50,20 @@ def _ensure_upload_batch_columns() -> None:
     with engine.begin() as connection:
         for name, column_type in missing:
             connection.execute(text(f"ALTER TABLE upload_batches ADD COLUMN {name} {column_type}"))
+
+
+def _ensure_batch_owner_columns() -> None:
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    inspector = inspect(engine)
+    table_columns = {
+        "import_lots": {"upload_batch_id": "VARCHAR(36)"},
+        "export_requirements": {"upload_batch_id": "VARCHAR(36)"},
+    }
+    with engine.begin() as connection:
+        for table_name, columns in table_columns.items():
+            existing = {column["name"] for column in inspector.get_columns(table_name)}
+            for name, column_type in columns.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {column_type}"))

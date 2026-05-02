@@ -12,7 +12,7 @@ from app.models import ExportRequirement, UploadBatch
 from app.schemas import MatchingRunResponse, UploadConfirmResponse, UploadPreviewResponse
 from app.services.matching import run_matching
 from app.services.parsing import ParseError, read_upload_rows
-from app.services.reports import allocation_rows, refund_report_xlsx, rows_to_csv
+from app.services.reports import allocation_rows, contest_example_report_xlsx, refund_report_xlsx, rows_to_csv
 from app.services.summaries import inventory_summary
 from app.services.uploads import confirm_batch, preview_exports, preview_imports
 
@@ -100,6 +100,15 @@ def api_report_xlsx(db: Session = Depends(get_db)):
         content=refund_report_xlsx(db),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="refund_report.xlsx"'},
+    )
+
+
+@router.get("/reports/contest-example.xlsx")
+def api_report_contest_example_xlsx(db: Session = Depends(get_db)):
+    return Response(
+        content=contest_example_report_xlsx(db),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="contest_example_report.xlsx"'},
     )
 
 

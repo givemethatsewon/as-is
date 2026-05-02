@@ -10,7 +10,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ExportRequirement, ImportLot, UploadBatch, UploadPreviewRow, now_utc
+from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch, UploadPreviewRow, now_utc
+from app.services.matching import update_lot_status
 from app.services.parsing import clean_text, optional_text, parse_date, parse_decimal, parse_positive_int
 
 
@@ -31,6 +32,7 @@ EXPORT_OPTIONAL_COLUMNS = {
     "hs_code",
     "description",
     "unit_price",
+    "amount",
 }
 IMPORT_COLUMN_ALIASES = {
     "import_declaration_no": ["import_declaration_no", "declaration_no", "수입신고번호", "신고번호"],
@@ -54,13 +56,14 @@ IMPORT_COLUMN_ALIASES = {
     "qty_unit": ["qty_unit", "unit", "수량단위", "수량단위_1"],
 }
 EXPORT_COLUMN_ALIASES = {
-    "export_date": ["export_date", "수출일", "수출일자", "수출예정일"],
+    "export_date": ["export_date", "수출일", "수출일자", "수출예정일", "Ready to Ship"],
     "origin": ["origin", "원산지"],
     "part_number": ["part_number", "Part Number", "판매부번", "품번"],
-    "hs_code": ["hs_code", "HS Code", "세번", "세번코드"],
-    "required_qty": ["required_qty", "수출요청수량", "필요수량", "필요 수량", "매칭필요수량"],
+    "hs_code": ["hs_code", "HS Code", "세번", "세번코드", "HS코드", "세번부호"],
+    "required_qty": ["required_qty", "수출요청수량", "필요수량", "필요 수량", "매칭필요수량", "Qty", "Quantity"],
     "description": ["description", "Description", "품명", "규격", "설명"],
-    "unit_price": ["unit_price", "단가"],
+    "unit_price": ["unit_price", "단가", "U/Price", "Unit Price"],
+    "amount": ["amount", "Amount", "금액", "합계금액"],
 }
 CANONICAL_FIELD_DESCRIPTIONS = {
     "export_date": "수출 예정일 또는 수출일",
@@ -75,6 +78,9 @@ CANONICAL_FIELD_DESCRIPTIONS = {
     "spec": "규격 또는 품명",
     "import_qty": "수입 수량",
     "qty_unit": "수량 단위",
+    "description": "수출 품명 또는 설명",
+    "unit_price": "수출 단가",
+    "amount": "수출 금액",
 }
 
 
@@ -147,9 +153,11 @@ def normalize_export_columns(rows: list[dict[str, Any]]) -> tuple[list[dict[str,
     normalized_rows = [{canonical_by_source[source]: value for source, value in row.items()} for row in rows]
     missing = sorted(EXPORT_REQUIRED_COLUMNS - set(source_by_canonical))
     if missing:
+        missing_labels = [CANONICAL_FIELD_DESCRIPTIONS.get(column, column) for column in missing]
         raise ValueError(
-            "Missing required canonical columns: "
-            f"{', '.join(missing)}. Found columns: {', '.join(columns)}"
+            "필수 컬럼이 누락됐습니다: "
+            f"{', '.join(missing_labels)} ({', '.join(missing)}). "
+            f"업로드 파일 컬럼: {', '.join(columns)}"
         )
     mapped_columns = sorted((EXPORT_REQUIRED_COLUMNS | EXPORT_OPTIONAL_COLUMNS) & set(source_by_canonical))
     mapping_preview = {canonical: source_by_canonical[canonical] for canonical in mapped_columns}
@@ -189,7 +197,8 @@ def normalize_import_row(row: dict[str, Any]) -> dict[str, Any]:
 def normalize_export_row(row: dict[str, Any]) -> dict[str, Any]:
     required_qty = parse_positive_int(row.get("required_qty"), "required_qty")
     unit_price = parse_decimal(row.get("unit_price"), "unit_price")
-    amount = unit_price * required_qty if unit_price is not None else None
+    uploaded_amount = parse_decimal(row.get("amount"), "amount")
+    amount = uploaded_amount if uploaded_amount is not None else unit_price * required_qty if unit_price is not None else None
     return {
         "export_date": parse_date(row.get("export_date"), "export_date").isoformat(),
         "origin": clean_text(row.get("origin")).upper(),
@@ -213,12 +222,17 @@ def import_business_key(payload: dict[str, Any]) -> tuple[str, str, str, str, st
 
 
 def _existing_import_by_key(db: Session, payload: dict[str, Any]) -> ImportLot | None:
-    stmt = select(ImportLot).where(
-        ImportLot.import_declaration_no == payload["import_declaration_no"],
-        ImportLot.line_no == payload["line_no"],
-        ImportLot.row_no == payload["row_no"],
-        ImportLot.part_number == payload["part_number"],
-        ImportLot.origin == payload["origin"],
+    stmt = (
+        select(ImportLot)
+        .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+        .where(
+            ImportLot.import_declaration_no == payload["import_declaration_no"],
+            ImportLot.line_no == payload["line_no"],
+            ImportLot.row_no == payload["row_no"],
+            ImportLot.part_number == payload["part_number"],
+            ImportLot.origin == payload["origin"],
+            (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
+        )
     )
     return db.scalar(stmt)
 
@@ -368,6 +382,7 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
                     remaining_qty=payload["import_qty"],
                     duty_per_unit=parse_decimal(payload.get("duty_per_unit"), "duty_per_unit"),
                     status="available",
+                    upload_batch_id=batch.id,
                 )
             )
         else:
@@ -382,6 +397,7 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
                     required_qty=payload["required_qty"],
                     amount=parse_decimal(payload.get("amount"), "amount"),
                     status="pending",
+                    upload_batch_id=batch.id,
                 )
             )
         inserted_count += 1
@@ -416,7 +432,49 @@ def invalidate_confirmed_upload(db: Session, batch_id: str, reason: str | None =
         raise ValueError("이미 무효 처리된 파일입니다.")
     batch.invalidated_at = now_utc()
     batch.invalidated_reason = reason or "사용자가 파일 검토 화면에서 무효 처리했습니다."
+    if batch.upload_type == "imports":
+        _remove_allocations_for_invalidated_import_batch(db, batch.id)
+    elif batch.upload_type == "exports":
+        _remove_allocations_for_invalidated_export_batch(db, batch.id)
     db.commit()
+
+
+def _remove_allocations_for_invalidated_import_batch(db: Session, batch_id: str) -> None:
+    lots = list(db.scalars(select(ImportLot).where(ImportLot.upload_batch_id == batch_id)))
+    affected_exports: dict[str, ExportRequirement] = {}
+    for lot in lots:
+        for allocation in list(lot.allocations):
+            affected_exports[allocation.export_requirement_id] = allocation.export_requirement
+            db.delete(allocation)
+    db.flush()
+    for export in affected_exports.values():
+        _refresh_export_status_from_active_allocations(db, export)
+
+
+def _remove_allocations_for_invalidated_export_batch(db: Session, batch_id: str) -> None:
+    exports = list(db.scalars(select(ExportRequirement).where(ExportRequirement.upload_batch_id == batch_id)))
+    for export in exports:
+        for allocation in list(export.allocations):
+            lot = allocation.import_lot
+            lot.used_qty = max(0, lot.used_qty - allocation.matched_qty)
+            lot.remaining_qty += allocation.matched_qty
+            update_lot_status(lot, export.export_date)
+            db.delete(allocation)
+        export.status = "invalidated"
+
+
+def _refresh_export_status_from_active_allocations(db: Session, export: ExportRequirement) -> None:
+    matched_qty = sum(
+        db.scalars(
+            select(ExportAllocation.matched_qty).where(ExportAllocation.export_requirement_id == export.id)
+        ).all()
+    )
+    if matched_qty >= export.required_qty:
+        export.status = "matched"
+    elif matched_qty > 0:
+        export.status = "partial_matched"
+    else:
+        export.status = "pending"
 
 
 def column_mapping_for_batch(batch: UploadBatch) -> dict[str, str]:

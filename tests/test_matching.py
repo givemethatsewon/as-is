@@ -114,3 +114,18 @@ def test_hs_code_warning_does_not_block_matching(db_session):
     allocation = db_session.scalar(select(ExportAllocation))
     assert allocation is not None
     assert "differs" in allocation.hs_code_warning
+
+
+def test_zero_remaining_lot_is_excluded_from_matching(db_session):
+    lot = add_import_lot(db_session, declaration="A", accepted=date(2025, 1, 1), origin="CN", part="PN1", qty=10)
+    lot.used_qty = 10
+    lot.remaining_qty = 0
+    lot.status = "used_up"
+    db_session.commit()
+    export = add_export_requirement(db_session, exported=date(2025, 2, 1), origin="CN", part="PN1", qty=5)
+
+    run_matching(db_session)
+
+    db_session.refresh(export)
+    assert export.status == "insufficient_stock"
+    assert db_session.scalar(select(func.count(ExportAllocation.id))) == 0

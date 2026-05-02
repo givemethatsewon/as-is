@@ -18,6 +18,7 @@ STATUS_LABELS = {
     "matched": "매칭 완료",
     "partial_matched": "일부 매칭",
     "insufficient_stock": "재고 부족",
+    "invalidated": "무효 처리",
     "new": "신규",
     "duplicate": "중복",
     "conflict": "확인 필요",

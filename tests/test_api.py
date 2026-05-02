@@ -71,6 +71,21 @@ def test_upload_confirm_match_and_download_reports(client):
     assert "수입 란번호" in headers
     assert "수입 행번호" in headers
 
+    contest_response = client.get("/api/reports/contest-example.xlsx")
+    assert contest_response.status_code == 200
+    assert contest_response.content.startswith(b"PK")
+    contest_workbook = load_workbook(BytesIO(contest_response.content))
+    assert contest_workbook.sheetnames[:2] == ["수출 전 확인용 잔량표", "수출 건별 수입근거 자동기재표"]
+    basis_sheet = contest_workbook["수출 건별 수입근거 자동기재표"]
+    basis_headers = [cell.value for cell in basis_sheet[1]]
+    assert "수입신고번호" in basis_headers
+    assert "수리일" in basis_headers
+    assert "란번호" in basis_headers
+    assert "행번호" in basis_headers
+    assert "매칭 수량" in basis_headers
+    assert "매칭 후 잔량" in basis_headers
+    assert basis_sheet.cell(row=2, column=basis_headers.index("수입신고번호") + 1).value == "A"
+
 
 def test_import_preview_supports_column_aliases(client):
     import_csv = (
@@ -179,12 +194,67 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
     assert delete_confirmed.status_code == 400
     assert "무효 처리" in delete_confirmed.text
 
-    invalidate = client.post("/upload/invalidate", data={"batch_id": confirmed_batch_id}, follow_redirects=True)
+    invalidate = client.post(
+        "/upload/invalidate",
+        data={"batch_id": confirmed_batch_id, "reason": "잘못 올린 수입 파일"},
+        follow_redirects=True,
+    )
     assert invalidate.status_code == 200
     assert "무효 처리" in invalidate.text
 
     detail_after_invalidate = client.get(f"/upload/reviews/{confirmed_batch_id}")
     assert "이 파일은 무효 처리됐습니다" in detail_after_invalidate.text
+    assert "잘못 올린 수입 파일" in detail_after_invalidate.text
+    assert "이후 대시보드, 재고, 매칭, 리포트 집계에서 제외됩니다" in detail_after_invalidate.text
+
+
+def test_invalidated_confirmed_upload_is_excluded_from_inventory_matching_and_reports(client):
+    import_csv = (
+        "import_declaration_no,declaration_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,100,PC\n"
+    )
+    export_csv = "export_date,origin,part_number,required_qty\n2025-08-16,CN,MTG011114,60\n"
+
+    import_preview = client.post("/api/imports/preview", files={"file": ("imports.csv", import_csv, "text/csv")})
+    import_batch_id = import_preview.json()["batch_id"]
+    assert client.post("/api/imports/confirm", data={"batch_id": import_batch_id}).status_code == 200
+
+    export_preview = client.post("/api/exports/preview", files={"file": ("exports.csv", export_csv, "text/csv")})
+    export_batch_id = export_preview.json()["batch_id"]
+    assert client.post("/api/exports/confirm", data={"batch_id": export_batch_id}).status_code == 200
+
+    assert client.post("/api/matching/run").json()["allocation_count"] == 1
+
+    invalidate = client.post(
+        "/upload/invalidate",
+        data={"batch_id": import_batch_id, "reason": "중복 업로드"},
+        follow_redirects=True,
+    )
+    assert invalidate.status_code == 200
+
+    inventory = client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"})
+    assert inventory.json()["total_imported_qty"] == 0
+    assert inventory.json()["remaining_qty"] == 0
+    assert inventory.json()["lots"] == []
+
+    allocations = client.get("/api/reports/export-allocations").json()
+    assert allocations == []
+
+    matching = client.post("/api/matching/run")
+    assert matching.json()["insufficient_stock_count"] == 1
+
+
+def test_exports_page_shows_current_matching_rules(client):
+    response = client.get("/exports")
+
+    assert response.status_code == 200
+    assert "현재 매칭 기준" in response.text
+    assert "품번 동일" in response.text
+    assert "원산지 동일" in response.text
+    assert "360일 이내" in response.text
+    assert "잔량 &gt; 0" in response.text
+    assert "FIFO" in response.text
+    assert "HS 코드가 다르면 매칭은 진행하고 경고를 남깁니다" in response.text
 
 
 def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
@@ -196,6 +266,7 @@ def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
     assert "수출건별 수입근거 매칭 결과" in response.text
     assert "매칭 결과 CSV로 내려받기" in response.text
     assert "전체 엑셀 파일로 내려받기" in response.text
+    assert "공모전 예시 양식 출력" in response.text
     assert "환급예상" in response.text
     assert "최종 신고 금액과 다를 수 있습니다" in response.text
     assert "아직 수입 재고가 없습니다" in response.text

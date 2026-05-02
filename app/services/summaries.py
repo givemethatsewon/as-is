@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import ExportAllocation, ExportRequirement, ImportLot
+from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch
 
 
 STATUS_LABELS = {
@@ -18,9 +18,17 @@ STATUS_LABELS = {
 
 def dashboard_summary(db: Session) -> dict[str, int]:
     today = date.today()
-    lots = list(db.scalars(select(ImportLot)))
+    lots = list(db.scalars(_active_import_lot_stmt()))
     total_import_qty = sum(lot.import_qty for lot in lots)
-    total_matched_qty = int(db.scalar(select(func.coalesce(func.sum(ExportAllocation.matched_qty), 0))) or 0)
+    total_matched_qty = int(
+        db.scalar(
+            select(func.coalesce(func.sum(ExportAllocation.matched_qty), 0))
+            .join(ImportLot, ExportAllocation.import_lot_id == ImportLot.id)
+            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+            .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        )
+        or 0
+    )
     total_remaining_qty = sum(lot.remaining_qty for lot in lots)
     available_qty = sum(
         lot.remaining_qty for lot in lots if lot.remaining_qty > 0 and 0 <= (today - lot.import_accepted_date).days <= 360
@@ -52,7 +60,7 @@ def dashboard_insights(db: Session) -> dict[str, object]:
 
 def expiring_import_lots(db: Session, today: date, limit: int = 10) -> list[dict[str, object]]:
     lots = db.scalars(
-        select(ImportLot)
+        _active_import_lot_stmt()
         .where(ImportLot.remaining_qty > 0)
         .order_by(ImportLot.import_accepted_date, ImportLot.part_number, ImportLot.import_declaration_no)
     )
@@ -80,7 +88,12 @@ def expiring_import_lots(db: Session, today: date, limit: int = 10) -> list[dict
 def matching_status_distribution(db: Session) -> list[dict[str, object]]:
     status_order = ["matched", "partial_matched", "insufficient_stock", "pending"]
     counts = dict(
-        db.execute(select(ExportRequirement.status, func.count()).group_by(ExportRequirement.status)).all()
+        db.execute(
+            select(ExportRequirement.status, func.count())
+            .outerjoin(UploadBatch, ExportRequirement.upload_batch_id == UploadBatch.id)
+            .where((ExportRequirement.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+            .group_by(ExportRequirement.status)
+        ).all()
     )
     total = sum(int(value) for value in counts.values())
     rows = []
@@ -103,7 +116,9 @@ def hs_code_warning_rows(db: Session, limit: int = 10) -> list[dict[str, object]
         select(ExportRequirement, ExportAllocation, ImportLot)
         .join(ExportAllocation, ExportAllocation.export_requirement_id == ExportRequirement.id)
         .join(ImportLot, ExportAllocation.import_lot_id == ImportLot.id)
+        .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
         .where(ExportAllocation.hs_code_warning.is_not(None))
+        .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
         .order_by(ExportRequirement.export_date.desc(), ExportRequirement.part_number, ImportLot.import_accepted_date)
         .limit(limit)
     ).all()
@@ -124,7 +139,7 @@ def hs_code_warning_rows(db: Session, limit: int = 10) -> list[dict[str, object]
 
 
 def inventory_query(db: Session, part_number: str | None = None, origin: str | None = None, status: str | None = None):
-    stmt = select(ImportLot)
+    stmt = _active_import_lot_stmt()
     if part_number:
         stmt = stmt.where(ImportLot.part_number.contains(part_number.upper()))
     if origin:
@@ -140,6 +155,12 @@ def inventory_query(db: Session, part_number: str | None = None, origin: str | N
                 ImportLot.import_declaration_no,
             )
         )
+    )
+
+
+def _active_import_lot_stmt():
+    return select(ImportLot).outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id).where(
+        (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None))
     )
 
 

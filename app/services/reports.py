@@ -9,9 +9,9 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
-from app.models import ExportAllocation, ExportRequirement, ImportLot
+from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch
 from app.services.summaries import dashboard_summary
 
 
@@ -90,7 +90,10 @@ SHEET_CONFIG = {
 
 def import_lot_rows(db: Session) -> list[dict[str, Any]]:
     lots = db.scalars(
-        select(ImportLot).order_by(ImportLot.part_number, ImportLot.origin, ImportLot.import_accepted_date)
+        select(ImportLot)
+        .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+        .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        .order_by(ImportLot.part_number, ImportLot.origin, ImportLot.import_accepted_date)
     )
     return [
         {
@@ -113,10 +116,16 @@ def import_lot_rows(db: Session) -> list[dict[str, Any]]:
 
 
 def allocation_rows(db: Session) -> list[dict[str, Any]]:
+    import_batch = aliased(UploadBatch)
+    export_batch = aliased(UploadBatch)
     rows = db.execute(
         select(ExportRequirement, ExportAllocation, ImportLot)
         .join(ExportAllocation, ExportAllocation.export_requirement_id == ExportRequirement.id)
         .join(ImportLot, ExportAllocation.import_lot_id == ImportLot.id)
+        .outerjoin(import_batch, ImportLot.upload_batch_id == import_batch.id)
+        .outerjoin(export_batch, ExportRequirement.upload_batch_id == export_batch.id)
+        .where((ImportLot.upload_batch_id.is_(None)) | (import_batch.invalidated_at.is_(None)))
+        .where((ExportRequirement.upload_batch_id.is_(None)) | (export_batch.invalidated_at.is_(None)))
         .order_by(ExportRequirement.export_date, ExportRequirement.part_number, ImportLot.import_accepted_date)
     ).all()
     return [
@@ -157,6 +166,8 @@ def inventory_summary_rows(db: Session) -> list[dict[str, Any]]:
             func.coalesce(func.sum(ImportLot.used_qty), 0),
             func.coalesce(func.sum(ImportLot.remaining_qty), 0),
         )
+        .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+        .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
         .group_by(ImportLot.part_number, ImportLot.origin)
         .order_by(ImportLot.part_number, ImportLot.origin)
     )
@@ -194,6 +205,54 @@ def refund_report_xlsx(db: Session) -> bytes:
         for sheet_name, config in SHEET_CONFIG.items():
             rows = source_rows[config["source"]]
             headers = config["headers"]
+            frame = pd.DataFrame(rows, columns=headers.keys()).rename(columns=headers)
+            frame.to_excel(writer, sheet_name=sheet_name, index=False)
+            _style_report_sheet(writer.sheets[sheet_name])
+    output.seek(0)
+    return output.read()
+
+
+def contest_example_report_xlsx(db: Session) -> bytes:
+    output = BytesIO()
+    sheets = {
+        "수출 전 확인용 잔량표": (
+            import_lot_rows(db),
+            {
+                "import_declaration_no": "수입신고번호",
+                "import_accepted_date": "수리일",
+                "origin": "원산지",
+                "hs_code": "세번",
+                "line_no": "란번호",
+                "row_no": "행번호",
+                "part_number": "품번",
+                "import_qty": "수입 수량",
+                "used_qty": "기매칭 수량",
+                "remaining_qty": "잔량",
+                "status": "상태",
+            },
+        ),
+        "수출 건별 수입근거 자동기재표": (
+            allocation_rows(db),
+            {
+                "export_date": "수출일",
+                "part_number": "Part Number",
+                "description": "Description",
+                "required_qty": "Qty",
+                "amount": "Amount",
+                "import_declaration_no": "수입신고번호",
+                "import_accepted_date": "수리일",
+                "origin": "원산지",
+                "hs_code": "세번",
+                "line_no": "란번호",
+                "row_no": "행번호",
+                "matched_qty": "매칭 수량",
+                "remaining_qty_after": "매칭 후 잔량",
+                "hs_code_warning": "HS 코드 확인",
+            },
+        ),
+    }
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, (rows, headers) in sheets.items():
             frame = pd.DataFrame(rows, columns=headers.keys()).rename(columns=headers)
             frame.to_excel(writer, sheet_name=sheet_name, index=False)
             _style_report_sheet(writer.sheets[sheet_name])

@@ -16,8 +16,18 @@
 {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
 
 <section class="table-section">
+  <h2>현재 매칭 기준</h2>
+  <p class="table-caption">매칭 엔진은 아래 조건을 순서대로 적용합니다.</p>
+  <div class="term-list" aria-label="현재 매칭 기준">
+    {% for rule in matching_rules %}
+    <span class="term">{{ rule }}</span>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="table-section">
   <h2>수출 요청 목록</h2>
-  <p class="table-caption">FIFO는 먼저 수입된 재고부터 사용하는 방식입니다. 같은 품번과 원산지를 기준으로 남은 수입 재고를 연결합니다.</p>
+  <p class="table-caption">무효 처리된 업로드에서 저장된 수출 요청은 목록과 매칭 대상에서 제외됩니다.</p>
   <div class="table-wrap">
     <table>
       <thead>

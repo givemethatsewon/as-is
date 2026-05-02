@@ -46,6 +46,7 @@ class ImportLot(Base):
     remaining_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     duty_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="available", index=True)
+    upload_batch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("upload_batches.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
 
@@ -65,6 +66,7 @@ class ExportRequirement(Base):
     required_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
+    upload_batch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("upload_batches.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
 
     allocations: Mapped[list[ExportAllocation]] = relationship(back_populates="export_requirement")

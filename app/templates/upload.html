@@ -36,7 +36,7 @@
       <h2>최근 검토한 파일</h2>
       <p class="table-caption flush">색상으로 저장 가능 여부를 빠르게 확인하세요. 초록색은 저장할 신규 행, 빨간색은 확인이 필요한 행입니다.</p>
     </div>
-    <p class="policy-note">저장 전 기록은 삭제할 수 있고, 저장 완료 자료는 삭제 대신 무효 처리합니다.</p>
+    <p class="policy-note">저장 전 기록은 삭제할 수 있고, 저장 완료 자료는 삭제 대신 무효 처리합니다. 무효 처리된 업로드의 본 데이터는 이후 대시보드, 재고, 매칭, 리포트 집계에서 제외됩니다.</p>
   </div>
   <div class="table-wrap">
     <table>
@@ -92,6 +92,7 @@
               {% elif not batch.invalidated_at %}
               <form action="/upload/invalidate" method="post">
                 <input type="hidden" name="batch_id" value="{{ batch.id }}">
+                <input type="hidden" name="reason" value="최근 검토 파일 목록에서 무효 처리">
                 <button class="icon-button danger" type="submit" aria-label="무효 처리" title="무효 처리">
                   <span class="material-symbols-rounded" aria-hidden="true">block</span>
                 </button>

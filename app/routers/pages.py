@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import ExportRequirement, UploadBatch
-from app.services.matching import run_matching
+from app.services.matching import MATCHING_RULES_KO, run_matching
 from app.services.parsing import ParseError, read_upload_rows
 from app.services.reports import allocation_rows, import_lot_rows
 from app.services.summaries import dashboard_insights, dashboard_summary, inventory_summary
@@ -110,12 +110,12 @@ def delete_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db))
 
 
 @router.post("/upload/invalidate")
-def invalidate_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db)):
+def invalidate_upload_page(batch_id: str = Form(...), reason: str | None = Form(None), db: Session = Depends(get_db)):
     try:
-        invalidate_confirmed_upload(db, batch_id)
+        invalidate_confirmed_upload(db, batch_id, reason)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _upload_redirect("저장된 파일을 무효 처리했습니다. 이미 저장된 자료는 삭제하지 않고 이력만 남깁니다.")
+    return _upload_redirect("저장된 파일을 무효 처리했습니다. 이 업로드에서 저장된 자료는 이후 집계와 매칭에서 제외됩니다.")
 
 
 @router.get("/inventory")
@@ -146,11 +146,16 @@ def inventory_page(
 
 @router.get("/exports")
 def exports_page(request: Request, db: Session = Depends(get_db)):
-    exports = db.scalars(select(ExportRequirement).order_by(ExportRequirement.export_date.desc())).all()
+    exports = db.scalars(
+        select(ExportRequirement)
+        .outerjoin(UploadBatch, ExportRequirement.upload_batch_id == UploadBatch.id)
+        .where((ExportRequirement.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        .order_by(ExportRequirement.export_date.desc())
+    ).all()
     return templates.TemplateResponse(
         request,
         "exports.html",
-        {"active": "exports", "exports": exports, "message": None},
+        {"active": "exports", "exports": exports, "message": None, "matching_rules": MATCHING_RULES_KO},
     )
 
 
@@ -161,7 +166,12 @@ def run_matching_page(
     db: Session = Depends(get_db),
 ):
     summary = run_matching(db, export_date)
-    exports = db.scalars(select(ExportRequirement).order_by(ExportRequirement.export_date.desc())).all()
+    exports = db.scalars(
+        select(ExportRequirement)
+        .outerjoin(UploadBatch, ExportRequirement.upload_batch_id == UploadBatch.id)
+        .where((ExportRequirement.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        .order_by(ExportRequirement.export_date.desc())
+    ).all()
     message = (
         f"매칭 완료 {summary.matched_count}건, 일부 매칭 {summary.partial_matched_count}건, "
         f"재고 부족 {summary.insufficient_stock_count}건입니다. 수입 재고 연결은 {summary.allocation_count}건 생성됐습니다."
@@ -169,7 +179,7 @@ def run_matching_page(
     return templates.TemplateResponse(
         request,
         "exports.html",
-        {"active": "exports", "exports": exports, "message": message},
+        {"active": "exports", "exports": exports, "message": message, "matching_rules": MATCHING_RULES_KO},
     )
 
 
