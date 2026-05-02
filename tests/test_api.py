@@ -170,13 +170,13 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
 
     detail = client.get(f"/upload/reviews/{batch_id}")
     assert detail.status_code == 200
-    assert "행별 검토 결과" in detail.text
-    assert "파일 컬럼 연결 결과" in detail.text
+    assert "행별 결과" in detail.text
+    assert "컬럼 연결" in detail.text
 
     upload_page = client.get("/upload")
     assert "상세 보기" in upload_page.text
     assert "삭제" in upload_page.text
-    assert "파일 다시 선택" in upload_page.text
+    assert "업로드" in upload_page.text
     assert "배치" not in upload_page.text
 
     delete = client.post("/upload/delete", data={"batch_id": batch_id}, follow_redirects=False)
@@ -203,9 +203,8 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
     assert "무효 처리" in invalidate.text
 
     detail_after_invalidate = client.get(f"/upload/reviews/{confirmed_batch_id}")
-    assert "이 파일은 무효 처리됐습니다" in detail_after_invalidate.text
+    assert "무효 처리된 파일입니다" in detail_after_invalidate.text
     assert "잘못 올린 수입 파일" in detail_after_invalidate.text
-    assert "이후 대시보드, 재고, 매칭, 리포트 집계에서 제외됩니다" in detail_after_invalidate.text
 
 
 def test_invalidated_confirmed_upload_is_excluded_from_inventory_matching_and_reports(client):
@@ -261,24 +260,24 @@ def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
     response = client.get("/reports")
 
     assert response.status_code == 200
-    assert "다운로드 전에 자료를 확인하세요" in response.text
+    assert "매칭 결과와 재고 현황을 파일로 내보냅니다." in response.text
     assert "수입신고별 잔량" in response.text
-    assert "수출건별 수입근거 매칭 결과" in response.text
-    assert "매칭 결과 CSV로 내려받기" in response.text
-    assert "전체 엑셀 파일로 내려받기" in response.text
-    assert "공모전 예시 양식 출력" in response.text
+    assert "수출건별 매칭 결과" in response.text
+    assert "매칭 결과 CSV" in response.text
+    assert "전체 리포트 XLSX" in response.text
+    assert "공모전 양식 XLSX" in response.text
     assert "환급예상" in response.text
-    assert "최종 신고 금액과 다를 수 있습니다" in response.text
-    assert "아직 수입 재고가 없습니다" in response.text
-    assert "아직 내려받을 매칭 결과가 없습니다" in response.text
+    assert "수입 재고가 없습니다" in response.text
+    assert "매칭 결과가 없습니다" in response.text
 
 
 def test_inventory_page_translates_status_filter_labels(client):
     response = client.get("/inventory")
 
     assert response.status_code == 200
-    assert "조건에 맞는 재고 보기" in response.text
+    assert "조회" in response.text
     assert "사용 가능" in response.text
     assert "만료 예정" in response.text
+    assert "용어 보기" in response.text
     assert "수리일" in response.text
-    assert "세관이 수입신고를 받아들인 날짜" in response.text
+    assert "수입신고 수리일" in response.text

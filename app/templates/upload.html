@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}업로드 · As-Is{% endblock %}
+{% block title %}파일 검토 · As-Is{% endblock %}
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">먼저 검토</p>
-    <h1>파일을 바로 반영하기 전에 확인하세요</h1>
-    <p class="supporting-copy">CSV 또는 XLSX 파일을 읽어 신규, 중복, 충돌, 오류를 먼저 보여줍니다. 오류가 없을 때만 신규 행을 저장할 수 있습니다.</p>
+    <p class="eyebrow">파일 검토</p>
+    <h1>파일 검토</h1>
+    <p class="supporting-copy">업로드한 파일을 먼저 확인한 뒤 저장합니다.</p>
   </div>
 </section>
 
@@ -15,40 +15,39 @@
 <section class="split" id="upload-forms">
   <form class="panel" action="/upload/imports/preview" method="post" enctype="multipart/form-data">
     <h2>수입 데이터</h2>
-    <p class="muted">수입신고번호, 수리일, 품번, 원산지, 수량이 들어 있는 파일을 선택합니다.</p>
-    <p class="help-note"><strong>CSV/XLSX</strong>는 엑셀에서 열 수 있는 표 형식 파일입니다.</p>
+    <p class="muted">수입신고 파일을 업로드합니다.</p>
+    <p class="help-note">CSV 또는 XLSX 파일 지원</p>
     <input type="file" name="file" accept=".csv,.xlsx" required>
-    <button class="button primary" type="submit">수입 파일 검토하기</button>
+    <button class="button primary" type="submit">수입 파일 업로드</button>
   </form>
 
   <form class="panel" action="/upload/exports/preview" method="post" enctype="multipart/form-data">
     <h2>수출 요청</h2>
-    <p class="muted">수출일자, 원산지, 품번, 필요한 수량이 들어 있는 파일을 선택합니다.</p>
-    <p class="help-note"><strong>품번</strong>은 같은 제품을 구분하는 부품 번호입니다. 파일에서는 Part Number로 표시될 수 있습니다.</p>
+    <p class="muted">수출 요청 파일을 업로드합니다.</p>
+    <p class="help-note">CSV 또는 XLSX 파일 지원</p>
     <input type="file" name="file" accept=".csv,.xlsx" required>
-    <button class="button primary" type="submit">수출 요청 검토하기</button>
+    <button class="button primary" type="submit">수출 파일 업로드</button>
   </form>
 </section>
 
 <section class="table-section">
   <div class="section-head">
     <div>
-      <h2>최근 검토한 파일</h2>
-      <p class="table-caption flush">색상으로 저장 가능 여부를 빠르게 확인하세요. 초록색은 저장할 신규 행, 빨간색은 확인이 필요한 행입니다.</p>
+      <h2>최근 검토 파일</h2>
+      <p class="table-caption flush">저장 전 파일은 삭제할 수 있고, 저장 후에는 무효 처리할 수 있습니다.</p>
     </div>
-    <p class="policy-note">저장 전 기록은 삭제할 수 있고, 저장 완료 자료는 삭제 대신 무효 처리합니다. 무효 처리된 업로드의 본 데이터는 이후 대시보드, 재고, 매칭, 리포트 집계에서 제외됩니다.</p>
   </div>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>파일 종류</th><th>파일명</th>
-          <th><span class="header-chip neutral">전체 행</span></th>
-          <th><span class="header-chip good">새로 저장할 행</span></th>
-          <th><span class="header-chip neutral">이미 있는 행</span></th>
-          <th><span class="header-chip danger">확인 필요</span></th>
+          <th><span class="header-chip neutral">전체</span></th>
+          <th><span class="header-chip good">신규</span></th>
+          <th><span class="header-chip neutral">중복</span></th>
+          <th><span class="header-chip danger">충돌</span></th>
           <th><span class="header-chip danger">오류</span></th>
-          <th><span class="header-chip neutral">처리 상태</span></th>
+          <th><span class="header-chip neutral">상태</span></th>
           <th><span class="header-chip neutral">작업</span></th>
         </tr>
       </thead>
@@ -64,7 +63,7 @@
           <td><span class="count-pill {{ 'danger' if batch.error_count > 0 else 'neutral' }}">{{ batch.error_count }}</span></td>
           <td>
             {% if batch.invalidated_at %}
-            <span class="status invalidated">무효 처리</span>
+            <span class="status invalidated">무효</span>
             {% elif batch.confirmed_at %}
             <span class="status matched">저장 완료</span>
             {% else %}
@@ -79,7 +78,7 @@
               {% if not batch.confirmed_at %}
               <form action="/upload/confirm" method="post">
                 <input type="hidden" name="batch_id" value="{{ batch.id }}">
-                <button class="icon-button primary" type="submit" aria-label="신규 행 저장" title="신규 행 저장" {% if batch.error_count > 0 %}disabled{% endif %}>
+                <button class="icon-button primary" type="submit" aria-label="저장" title="저장" {% if batch.error_count > 0 %}disabled{% endif %}>
                   <span class="material-symbols-rounded" aria-hidden="true">save</span>
                 </button>
               </form>
@@ -98,14 +97,14 @@
                 </button>
               </form>
               {% endif %}
-              <a class="icon-button" href="#upload-forms" aria-label="파일 다시 선택" title="파일 다시 선택">
+              <a class="icon-button" href="#upload-forms" aria-label="업로드" title="업로드">
                 <span class="material-symbols-rounded" aria-hidden="true">upload_file</span>
               </a>
             </div>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="9" class="empty">아직 검토한 파일이 없습니다. 수입 또는 수출 파일을 먼저 선택하세요.</td></tr>
+        <tr><td colspan="9" class="empty">최근 검토 파일이 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>
