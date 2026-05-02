@@ -243,6 +243,48 @@ def test_invalidated_confirmed_upload_is_excluded_from_inventory_matching_and_re
     assert matching.json()["insufficient_stock_count"] == 1
 
 
+def test_invalidated_import_upload_can_be_reactivated_by_reupload(client):
+    original_import_csv = (
+        "import_declaration_no,declaration_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,100,PC\n"
+    )
+    corrected_import_csv = (
+        "import_declaration_no,declaration_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK CORRECTED,120,PC\n"
+    )
+
+    preview = client.post("/api/imports/preview", files={"file": ("imports.csv", original_import_csv, "text/csv")})
+    original_batch_id = preview.json()["batch_id"]
+    assert client.post("/api/imports/confirm", data={"batch_id": original_batch_id}).status_code == 200
+
+    invalidate = client.post(
+        "/upload/invalidate",
+        data={"batch_id": original_batch_id, "reason": "수량 수정"},
+        follow_redirects=True,
+    )
+    assert invalidate.status_code == 200
+
+    reupload_preview = client.post(
+        "/api/imports/preview",
+        files={"file": ("imports.csv", corrected_import_csv, "text/csv")},
+    )
+    assert reupload_preview.status_code == 200
+    assert reupload_preview.json()["new_count"] == 0
+    assert reupload_preview.json()["reactivate_count"] == 1
+
+    reupload_batch_id = reupload_preview.json()["batch_id"]
+    reupload_confirm = client.post("/api/imports/confirm", data={"batch_id": reupload_batch_id})
+    assert reupload_confirm.status_code == 200
+    assert reupload_confirm.json()["inserted_count"] == 0
+    assert reupload_confirm.json()["reactivated_count"] == 1
+
+    inventory = client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"})
+    body = inventory.json()
+    assert body["total_imported_qty"] == 120
+    assert body["remaining_qty"] == 120
+    assert body["lots"][0]["spec"] == "STEERING RACK CORRECTED"
+
+
 def test_exports_page_shows_current_matching_rules(client):
     response = client.get("/exports")
 

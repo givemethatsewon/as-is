@@ -222,19 +222,35 @@ def import_business_key(payload: dict[str, Any]) -> tuple[str, str, str, str, st
 
 
 def _existing_import_by_key(db: Session, payload: dict[str, Any]) -> ImportLot | None:
+    stmt = _import_by_key_stmt(payload).outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id).where(
+        (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None))
+    )
+    return db.scalar(stmt)
+
+
+def _any_existing_import_by_key(db: Session, payload: dict[str, Any]) -> ImportLot | None:
+    return db.scalar(_import_by_key_stmt(payload))
+
+
+def _import_by_key_stmt(payload: dict[str, Any]):
     stmt = (
         select(ImportLot)
-        .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
         .where(
             ImportLot.import_declaration_no == payload["import_declaration_no"],
             ImportLot.line_no == payload["line_no"],
             ImportLot.row_no == payload["row_no"],
             ImportLot.part_number == payload["part_number"],
             ImportLot.origin == payload["origin"],
-            (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
         )
     )
-    return db.scalar(stmt)
+    return stmt
+
+
+def _is_from_invalidated_batch(db: Session, lot: ImportLot) -> bool:
+    if lot.upload_batch_id is None:
+        return False
+    batch = db.get(UploadBatch, lot.upload_batch_id)
+    return bool(batch and batch.invalidated_at is not None)
 
 
 def _classify_existing_import(existing: ImportLot, payload: dict[str, Any]) -> tuple[str, str]:
@@ -247,6 +263,18 @@ def _classify_existing_import(existing: ImportLot, payload: dict[str, Any]) -> t
     if same:
         return "duplicate", "Existing lot with the same business key and values."
     return "conflict", "Existing lot has the same business key but different values."
+
+
+def _classify_import_for_preview(db: Session, payload: dict[str, Any]) -> tuple[str, str]:
+    existing = _existing_import_by_key(db, payload)
+    if existing:
+        return _classify_existing_import(existing, payload)
+
+    invalidated_existing = _any_existing_import_by_key(db, payload)
+    if invalidated_existing and _is_from_invalidated_batch(db, invalidated_existing):
+        return "reactivate", "무효 처리된 기존 수입 건을 새 업로드 기준으로 다시 활성화합니다."
+
+    return "new", "Ready to insert."
 
 
 def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> PreviewResult:
@@ -273,8 +301,7 @@ def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
                     status, message = "conflict", "Uploaded file has the same business key with different values."
             else:
                 seen_payloads[key] = payload
-                existing = _existing_import_by_key(db, payload)
-                status, message = _classify_existing_import(existing, payload) if existing else ("new", "Ready to insert.")
+                status, message = _classify_import_for_preview(db, payload)
         except ValueError as exc:
             payload = {key: clean_text(value) for key, value in row.items()}
             status, message = "error", str(exc)
@@ -356,35 +383,41 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
         raise ValueError("무효 처리된 파일은 저장할 수 없습니다.")
 
     inserted_count = 0
+    reactivated_count = 0
     skipped_count = 0
     error_count = 0
     for row in batch.rows:
-        if row.row_status != "new":
+        if row.row_status not in {"new", "reactivate"}:
             skipped_count += 1
             if row.row_status == "error":
                 error_count += 1
             continue
         payload = json.loads(row.payload_json)
         if batch.upload_type == "imports":
-            db.add(
-                ImportLot(
-                    import_declaration_no=payload["import_declaration_no"],
-                    import_accepted_date=parse_date(payload["import_accepted_date"], "import_accepted_date"),
-                    origin=payload["origin"],
-                    hs_code=payload["hs_code"],
-                    line_no=payload["line_no"],
-                    row_no=payload["row_no"],
-                    part_number=payload["part_number"],
-                    spec=payload.get("spec"),
-                    import_qty=payload["import_qty"],
-                    qty_unit=payload.get("qty_unit"),
-                    used_qty=0,
-                    remaining_qty=payload["import_qty"],
-                    duty_per_unit=parse_decimal(payload.get("duty_per_unit"), "duty_per_unit"),
-                    status="available",
-                    upload_batch_id=batch.id,
+            if row.row_status == "reactivate":
+                _reactivate_import_lot(db, payload, batch.id)
+                reactivated_count += 1
+            else:
+                db.add(
+                    ImportLot(
+                        import_declaration_no=payload["import_declaration_no"],
+                        import_accepted_date=parse_date(payload["import_accepted_date"], "import_accepted_date"),
+                        origin=payload["origin"],
+                        hs_code=payload["hs_code"],
+                        line_no=payload["line_no"],
+                        row_no=payload["row_no"],
+                        part_number=payload["part_number"],
+                        spec=payload.get("spec"),
+                        import_qty=payload["import_qty"],
+                        qty_unit=payload.get("qty_unit"),
+                        used_qty=0,
+                        remaining_qty=payload["import_qty"],
+                        duty_per_unit=parse_decimal(payload.get("duty_per_unit"), "duty_per_unit"),
+                        status="available",
+                        upload_batch_id=batch.id,
+                    )
                 )
-            )
+                inserted_count += 1
         else:
             db.add(
                 ExportRequirement(
@@ -400,16 +433,35 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
                     upload_batch_id=batch.id,
                 )
             )
-        inserted_count += 1
+            inserted_count += 1
 
     batch.confirmed_at = now_utc()
     db.commit()
     return {
         "batch_id": batch.id,
         "inserted_count": inserted_count,
+        "reactivated_count": reactivated_count,
         "skipped_count": skipped_count,
         "error_count": error_count,
     }
+
+
+def _reactivate_import_lot(db: Session, payload: dict[str, Any], batch_id: str) -> None:
+    lot = _any_existing_import_by_key(db, payload)
+    if lot is None or not _is_from_invalidated_batch(db, lot):
+        raise ValueError("재활성화할 무효 처리 수입 건을 찾을 수 없습니다.")
+
+    import_qty = int(payload["import_qty"])
+    lot.import_accepted_date = parse_date(payload["import_accepted_date"], "import_accepted_date")
+    lot.hs_code = payload["hs_code"]
+    lot.spec = payload.get("spec")
+    lot.import_qty = import_qty
+    lot.qty_unit = payload.get("qty_unit")
+    lot.used_qty = 0
+    lot.remaining_qty = import_qty
+    lot.duty_per_unit = parse_decimal(payload.get("duty_per_unit"), "duty_per_unit")
+    lot.status = "available"
+    lot.upload_batch_id = batch_id
 
 
 def delete_unconfirmed_upload(db: Session, batch_id: str) -> None:

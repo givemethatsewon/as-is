@@ -96,7 +96,11 @@ def confirm_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db)
         result = confirm_batch(db, batch_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    message = f"저장 완료 {result['inserted_count']}건, 건너뜀 {result['skipped_count']}건"
+    message = (
+        f"저장 완료 {result['inserted_count']}건, "
+        f"재활성화 {result.get('reactivated_count', 0)}건, "
+        f"건너뜀 {result['skipped_count']}건"
+    )
     return _upload_redirect(message)
 
 
@@ -195,6 +199,7 @@ def reports_page(request: Request, db: Session = Depends(get_db)):
 
 
 def _preview_template(request: Request, batch: UploadBatch, column_mapping: dict[str, str]):
+    reactivate_count = sum(1 for row in batch.rows if row.row_status == "reactivate")
     return templates.TemplateResponse(
         request,
         "upload_preview.html",
@@ -202,6 +207,7 @@ def _preview_template(request: Request, batch: UploadBatch, column_mapping: dict
             "active": "upload",
             "batch": batch,
             "rows": batch.rows,
+            "reactivate_count": reactivate_count,
             "column_mapping": column_mapping,
             "field_descriptions": CANONICAL_FIELD_DESCRIPTIONS,
         },

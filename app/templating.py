@@ -20,6 +20,7 @@ STATUS_LABELS = {
     "insufficient_stock": "재고 부족",
     "invalidated": "무효 처리",
     "new": "신규",
+    "reactivate": "재활성화",
     "duplicate": "중복",
     "conflict": "확인 필요",
     "error": "오류",

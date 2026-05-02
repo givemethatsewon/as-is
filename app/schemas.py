@@ -8,6 +8,7 @@ class UploadPreviewResponse(BaseModel):
     warnings: list[str]
     column_mapping: dict[str, str]
     new_count: int
+    reactivate_count: int = 0
     duplicate_count: int
     conflict_count: int
 
@@ -15,6 +16,7 @@ class UploadPreviewResponse(BaseModel):
 class UploadConfirmResponse(BaseModel):
     batch_id: str
     inserted_count: int
+    reactivated_count: int = 0
     skipped_count: int
     error_count: int
 

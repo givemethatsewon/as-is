@@ -113,6 +113,7 @@ def api_report_contest_example_xlsx(db: Session = Depends(get_db)):
 
 
 def _preview_response(batch: UploadBatch, warnings: list[str], column_mapping: dict[str, str]) -> dict[str, object]:
+    reactivate_count = sum(1 for row in batch.rows if row.row_status == "reactivate")
     return {
         "batch_id": batch.id,
         "uploaded_count": batch.total_rows,
@@ -120,6 +121,7 @@ def _preview_response(batch: UploadBatch, warnings: list[str], column_mapping: d
         "warnings": warnings,
         "column_mapping": column_mapping,
         "new_count": batch.new_count,
+        "reactivate_count": reactivate_count,
         "duplicate_count": batch.duplicate_count,
         "conflict_count": batch.conflict_count,
     }
