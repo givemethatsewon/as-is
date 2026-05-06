@@ -76,6 +76,38 @@ def test_import_preview_classifies_new_duplicate_conflict_and_error(db_session):
     assert result.batch.error_count == 1
 
 
+def test_import_preview_treats_spec_difference_as_conflict(db_session):
+    add_import_lot(
+        db_session,
+        declaration="A",
+        accepted=date(2025, 1, 1),
+        origin="CN",
+        part="PN1",
+        qty=10,
+        line_no="001",
+        row_no="01",
+    )
+    rows = [
+        {
+            "import_declaration_no": "A",
+            "import_accepted_date": "2025-01-01",
+            "origin": "CN",
+            "hs_code": "8708309000",
+            "line_no": "001",
+            "row_no": "01",
+            "part_number": "PN1",
+            "spec": "DIFFERENT SPEC",
+            "import_qty": "10",
+            "qty_unit": "PC",
+        }
+    ]
+
+    result = preview_imports(db_session, rows, "imports.csv")
+
+    assert result.batch.duplicate_count == 0
+    assert result.batch.conflict_count == 1
+
+
 def test_export_preview_supports_contest_sample_headers(db_session):
     rows = [
         {

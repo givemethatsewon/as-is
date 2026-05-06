@@ -254,15 +254,10 @@ def _is_from_invalidated_batch(db: Session, lot: ImportLot) -> bool:
 
 
 def _classify_existing_import(existing: ImportLot, payload: dict[str, Any]) -> tuple[str, str]:
-    same = (
-        existing.import_accepted_date.isoformat() == payload["import_accepted_date"]
-        and existing.hs_code == payload["hs_code"]
-        and existing.import_qty == payload["import_qty"]
-        and (existing.qty_unit or None) == payload["qty_unit"]
-    )
+    same = _existing_import_values(existing) == _payload_import_values(payload)
     if same:
-        return "duplicate", "Existing lot with the same business key and values."
-    return "conflict", "Existing lot has the same business key but different values."
+        return "duplicate", "기존 반영 데이터와 동일한 수입 건입니다."
+    return "conflict", "같은 수입 건이 이미 있지만 값이 달라 확인이 필요합니다."
 
 
 def _classify_import_for_preview(db: Session, payload: dict[str, Any]) -> tuple[str, str]:
@@ -274,7 +269,30 @@ def _classify_import_for_preview(db: Session, payload: dict[str, Any]) -> tuple[
     if invalidated_existing and _is_from_invalidated_batch(db, invalidated_existing):
         return "reactivate", "반영 취소된 기존 수입 건을 새 업로드 기준으로 다시 활성화합니다."
 
-    return "new", "Ready to insert."
+    return "new", "새로 반영할 수 있는 수입 건입니다."
+
+
+def _existing_import_values(existing: ImportLot) -> tuple[str, str, str | None, int, str | None, str | None]:
+    return (
+        existing.import_accepted_date.isoformat(),
+        existing.hs_code,
+        existing.spec or None,
+        existing.import_qty,
+        existing.qty_unit or None,
+        str(existing.duty_per_unit) if existing.duty_per_unit is not None else None,
+    )
+
+
+def _payload_import_values(payload: dict[str, Any]) -> tuple[str, str, str | None, int, str | None, str | None]:
+    duty_per_unit = parse_decimal(payload.get("duty_per_unit"), "duty_per_unit")
+    return (
+        payload["import_accepted_date"],
+        payload["hs_code"],
+        payload.get("spec"),
+        payload["import_qty"],
+        payload.get("qty_unit"),
+        str(duty_per_unit) if duty_per_unit is not None else None,
+    )
 
 
 def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> PreviewResult:
@@ -296,9 +314,9 @@ def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
             key = import_business_key(payload)
             if key in seen_payloads:
                 if _payload_values_match(seen_payloads[key], payload):
-                    status, message = "duplicate", "Duplicate lot inside uploaded file."
+                    status, message = "duplicate", "업로드 파일 안에 동일한 수입 건이 중복되어 있습니다."
                 else:
-                    status, message = "conflict", "Uploaded file has the same business key with different values."
+                    status, message = "conflict", "업로드 파일 안에 같은 수입 건이 있지만 값이 서로 다릅니다."
             else:
                 seen_payloads[key] = payload
                 status, message = _classify_import_for_preview(db, payload)
@@ -338,7 +356,7 @@ def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
     for index, row in enumerate(rows, start=2):
         try:
             payload = normalize_export_row(row)
-            status, message = "new", "Ready to insert."
+            status, message = "new", "새로 반영할 수 있는 수출 건입니다."
         except ValueError as exc:
             payload = {key: clean_text(value) for key, value in row.items()}
             status, message = "error", str(exc)
