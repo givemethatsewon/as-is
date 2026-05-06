@@ -170,13 +170,13 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
 
     detail = client.get(f"/upload/reviews/{batch_id}")
     assert detail.status_code == 200
-    assert "행별 결과" in detail.text
-    assert "컬럼 연결" in detail.text
+    assert "업로드 결과" in detail.text
+    assert "파일 항목 인식 결과" in detail.text
 
     upload_page = client.get("/upload")
-    assert "상세 보기" in upload_page.text
-    assert "삭제" in upload_page.text
-    assert "업로드" in upload_page.text
+    assert "확인" in upload_page.text
+    assert "업로드 취소" in upload_page.text
+    assert "다시 업로드" in upload_page.text
     assert "배치" not in upload_page.text
 
     delete = client.post("/upload/delete", data={"batch_id": batch_id}, follow_redirects=False)
@@ -192,7 +192,7 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
 
     delete_confirmed = client.post("/upload/delete", data={"batch_id": confirmed_batch_id})
     assert delete_confirmed.status_code == 400
-    assert "무효 처리" in delete_confirmed.text
+    assert "반영 취소" in delete_confirmed.text
 
     invalidate = client.post(
         "/upload/invalidate",
@@ -200,10 +200,10 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
         follow_redirects=True,
     )
     assert invalidate.status_code == 200
-    assert "무효 처리" in invalidate.text
+    assert "반영 취소" in invalidate.text
 
     detail_after_invalidate = client.get(f"/upload/reviews/{confirmed_batch_id}")
-    assert "무효 처리된 파일입니다" in detail_after_invalidate.text
+    assert "반영 취소된 파일입니다" in detail_after_invalidate.text
     assert "잘못 올린 수입 파일" in detail_after_invalidate.text
 
 
@@ -302,11 +302,12 @@ def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
     response = client.get("/reports")
 
     assert response.status_code == 200
-    assert "매칭 결과와 재고 현황을 파일로 내보냅니다." in response.text
+    assert "실무에서 기본으로 쓰는 엑셀 파일을 먼저 제공합니다." in response.text
     assert "수입신고별 잔량" in response.text
     assert "수출건별 매칭 결과" in response.text
+    assert "실무용 엑셀 다운로드" in response.text
+    assert "추가 다운로드 보기" in response.text
     assert "매칭 결과 CSV" in response.text
-    assert "전체 리포트 XLSX" in response.text
     assert "공모전 양식 XLSX" in response.text
     assert "환급예상" in response.text
     assert "수입 재고가 없습니다" in response.text

@@ -70,6 +70,11 @@ def test_dashboard_page_shows_customs_practitioner_insight_sections(client):
     response = client.get("/dashboard")
 
     assert response.status_code == 200
+    assert "중요한 재고 상태만 먼저 확인합니다." in response.text
     assert "만료 임박 재고" in response.text
-    assert "매칭 상태" in response.text
-    assert "HS 코드 확인 필요" in response.text
+    assert "남은 수량" in response.text
+    assert "지금 매칭 가능한 재고" in response.text
+    assert "30일 안에 기한이 지나는 건" in response.text
+    assert "수리일 기준 360일 초과" in response.text
+    assert "매칭 상태" not in response.text
+    assert "HS 코드 확인 필요" not in response.text

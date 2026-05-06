@@ -67,7 +67,7 @@ EXPORT_COLUMN_ALIASES = {
 }
 CANONICAL_FIELD_DESCRIPTIONS = {
     "export_date": "수출 예정일 또는 수출일",
-    "required_qty": "수출 요청 수량",
+    "required_qty": "수출 파일 수량",
     "import_declaration_no": "수입신고번호",
     "import_accepted_date": "수입신고 수리일",
     "origin": "원산지",
@@ -272,7 +272,7 @@ def _classify_import_for_preview(db: Session, payload: dict[str, Any]) -> tuple[
 
     invalidated_existing = _any_existing_import_by_key(db, payload)
     if invalidated_existing and _is_from_invalidated_batch(db, invalidated_existing):
-        return "reactivate", "무효 처리된 기존 수입 건을 새 업로드 기준으로 다시 활성화합니다."
+        return "reactivate", "반영 취소된 기존 수입 건을 새 업로드 기준으로 다시 활성화합니다."
 
     return "new", "Ready to insert."
 
@@ -376,11 +376,11 @@ def _payload_values_match(left: dict[str, Any], right: dict[str, Any]) -> bool:
 def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise ValueError("검토한 파일을 찾을 수 없습니다.")
+        raise ValueError("업로드한 파일을 찾을 수 없습니다.")
     if batch.confirmed_at is not None:
-        raise ValueError("이미 저장한 파일입니다.")
+        raise ValueError("이미 반영한 파일입니다.")
     if batch.invalidated_at is not None:
-        raise ValueError("무효 처리된 파일은 저장할 수 없습니다.")
+        raise ValueError("반영 취소된 파일은 다시 반영할 수 없습니다.")
 
     inserted_count = 0
     reactivated_count = 0
@@ -449,7 +449,7 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
 def _reactivate_import_lot(db: Session, payload: dict[str, Any], batch_id: str) -> None:
     lot = _any_existing_import_by_key(db, payload)
     if lot is None or not _is_from_invalidated_batch(db, lot):
-        raise ValueError("재활성화할 무효 처리 수입 건을 찾을 수 없습니다.")
+        raise ValueError("재활성화할 반영 취소 수입 건을 찾을 수 없습니다.")
 
     import_qty = int(payload["import_qty"])
     lot.import_accepted_date = parse_date(payload["import_accepted_date"], "import_accepted_date")
@@ -467,9 +467,9 @@ def _reactivate_import_lot(db: Session, payload: dict[str, Any], batch_id: str) 
 def delete_unconfirmed_upload(db: Session, batch_id: str) -> None:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise ValueError("검토한 파일을 찾을 수 없습니다.")
+        raise ValueError("업로드한 파일을 찾을 수 없습니다.")
     if batch.confirmed_at is not None:
-        raise ValueError("이미 저장한 파일은 삭제할 수 없습니다. 필요한 경우 무효 처리하세요.")
+        raise ValueError("이미 반영한 파일은 업로드 취소할 수 없습니다. 필요한 경우 반영 취소하세요.")
     db.delete(batch)
     db.commit()
 
@@ -477,13 +477,13 @@ def delete_unconfirmed_upload(db: Session, batch_id: str) -> None:
 def invalidate_confirmed_upload(db: Session, batch_id: str, reason: str | None = None) -> None:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise ValueError("검토한 파일을 찾을 수 없습니다.")
+        raise ValueError("업로드한 파일을 찾을 수 없습니다.")
     if batch.confirmed_at is None:
-        raise ValueError("아직 저장하지 않은 파일은 삭제할 수 있습니다.")
+        raise ValueError("아직 반영하지 않은 파일은 업로드 취소할 수 있습니다.")
     if batch.invalidated_at is not None:
-        raise ValueError("이미 무효 처리된 파일입니다.")
+        raise ValueError("이미 반영 취소된 파일입니다.")
     batch.invalidated_at = now_utc()
-    batch.invalidated_reason = reason or "사용자가 파일 검토 화면에서 무효 처리했습니다."
+    batch.invalidated_reason = reason or "사용자가 파일 업로드 화면에서 반영 취소했습니다."
     if batch.upload_type == "imports":
         _remove_allocations_for_invalidated_import_batch(db, batch.id)
     elif batch.upload_type == "exports":

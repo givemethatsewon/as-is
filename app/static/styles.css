@@ -387,8 +387,6 @@ button:disabled {
 
 .row-actions {
   align-items: center;
-  flex-wrap: nowrap;
-  min-width: 172px;
 }
 
 .filterbar {
@@ -593,8 +591,24 @@ th {
   font-weight: 800;
 }
 
+.term-details summary::marker {
+  color: var(--accent);
+}
+
 .term-details .term-list {
   padding: 10px 0 0;
+}
+
+.secondary-downloads {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  margin-top: 18px;
+  padding: 16px 18px;
+}
+
+.secondary-download-list {
+  margin-top: 14px;
 }
 
 .term {

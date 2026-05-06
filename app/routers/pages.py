@@ -97,7 +97,7 @@ def confirm_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     message = (
-        f"저장 완료 {result['inserted_count']}건, "
+        f"반영 완료 {result['inserted_count']}건, "
         f"재활성화 {result.get('reactivated_count', 0)}건, "
         f"건너뜀 {result['skipped_count']}건"
     )
@@ -110,7 +110,7 @@ def delete_upload_page(batch_id: str = Form(...), db: Session = Depends(get_db))
         delete_unconfirmed_upload(db, batch_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _upload_redirect("삭제했습니다.")
+    return _upload_redirect("업로드를 취소했습니다.")
 
 
 @router.post("/upload/invalidate")
@@ -119,7 +119,7 @@ def invalidate_upload_page(batch_id: str = Form(...), reason: str | None = Form(
         invalidate_confirmed_upload(db, batch_id, reason)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _upload_redirect("무효 처리했습니다.")
+    return _upload_redirect("반영을 취소했습니다.")
 
 
 @router.get("/inventory")
