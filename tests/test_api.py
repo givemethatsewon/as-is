@@ -3,6 +3,9 @@ from __future__ import annotations
 from io import BytesIO
 
 from openpyxl import load_workbook
+from sqlalchemy import func, select
+
+from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch, UploadPreviewRow
 
 
 def test_upload_confirm_match_and_download_reports(client):
@@ -324,3 +327,43 @@ def test_inventory_page_translates_status_filter_labels(client):
     assert "용어 보기" in response.text
     assert "수리일" in response.text
     assert "수입신고 수리일" in response.text
+
+
+def test_upload_page_can_clear_all_demo_data(client, db_session):
+    import_csv = (
+        "import_declaration_no,import_accepted_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,1256,PC\n"
+    )
+    export_csv = (
+        "export_date,origin,part_number,required_qty,description,unit_price\n"
+        "2025-08-16,CN,MTG011114,800,STEERING RACK,3\n"
+    )
+
+    import_preview = client.post("/api/imports/preview", files={"file": ("imports.csv", import_csv, "text/csv")})
+    import_batch_id = import_preview.json()["batch_id"]
+    assert client.post("/api/imports/confirm", data={"batch_id": import_batch_id}).status_code == 200
+
+    export_preview = client.post("/api/exports/preview", files={"file": ("exports.csv", export_csv, "text/csv")})
+    export_batch_id = export_preview.json()["batch_id"]
+    assert client.post("/api/exports/confirm", data={"batch_id": export_batch_id}).status_code == 200
+    assert client.post("/api/matching/run").status_code == 200
+
+    reset = client.post("/upload/reset", follow_redirects=True)
+
+    assert reset.status_code == 200
+    assert "전체 데이터를 초기화했습니다." in reset.text
+    assert "최근 업로드 파일이 없습니다." in reset.text
+    assert db_session.scalar(select(func.count(UploadBatch.id))) == 0
+    assert db_session.scalar(select(func.count(UploadPreviewRow.id))) == 0
+    assert db_session.scalar(select(func.count(ImportLot.id))) == 0
+    assert db_session.scalar(select(func.count(ExportRequirement.id))) == 0
+    assert db_session.scalar(select(func.count(ExportAllocation.id))) == 0
+
+    inventory = client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"})
+    assert inventory.status_code == 200
+    assert inventory.json()["lots"] == []
+    assert inventory.json()["remaining_qty"] == 0
+
+    allocations = client.get("/api/reports/export-allocations")
+    assert allocations.status_code == 200
+    assert allocations.json() == []

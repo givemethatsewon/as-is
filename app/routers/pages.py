@@ -16,6 +16,7 @@ from app.services.reports import allocation_rows, import_lot_rows
 from app.services.summaries import dashboard_insights, dashboard_summary, inventory_summary
 from app.services.uploads import (
     CANONICAL_FIELD_DESCRIPTIONS,
+    clear_all_demo_data,
     column_mapping_for_batch,
     confirm_batch,
     delete_unconfirmed_upload,
@@ -120,6 +121,12 @@ def invalidate_upload_page(batch_id: str = Form(...), reason: str | None = Form(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _upload_redirect("반영을 취소했습니다.")
+
+
+@router.post("/upload/reset")
+def reset_all_data_page(db: Session = Depends(get_db)):
+    clear_all_demo_data(db)
+    return _upload_redirect("전체 데이터를 초기화했습니다.")
 
 
 @router.get("/inventory")

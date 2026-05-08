@@ -509,6 +509,12 @@ def invalidate_confirmed_upload(db: Session, batch_id: str, reason: str | None =
     db.commit()
 
 
+def clear_all_demo_data(db: Session) -> None:
+    for model in (ExportAllocation, ExportRequirement, ImportLot, UploadPreviewRow, UploadBatch):
+        db.query(model).delete()
+    db.commit()
+
+
 def _remove_allocations_for_invalidated_import_batch(db: Session, batch_id: str) -> None:
     lots = list(db.scalars(select(ImportLot).where(ImportLot.upload_batch_id == batch_id)))
     affected_exports: dict[str, ExportRequirement] = {}
