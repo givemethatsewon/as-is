@@ -1,15 +1,65 @@
-# 처음처럼 - 원상태수출관리 / As-Is
+# As-Is
 
-FastAPI, SQLite, Jinja templates 기반 원상태 수출 재고/매칭 데모 웹입니다.
+관세사를 위한 원상태수출 재고 매칭 데모입니다. 수입 신고 자료와 수출 예정 자료를 업로드하면 품번, 원산지, 수입 수리일 기준으로 사용 가능한 수입 재고를 찾고 FIFO 방식으로 수출 건에 배정합니다.
 
-## 2분 시연 방법
+This is a local-first FastAPI application for customs refund workflow prototyping. It helps customs brokers and trade operations teams review import inventory, export requirements, matching evidence, and report downloads before preparing an actual refund claim.
 
-### Windows
+## What It Does
 
-1. 이 폴더에서 `start.bat`을 더블클릭합니다.
-2. 브라우저에서 `http://127.0.0.1:8000`을 엽니다.
+- Imports CSV/XLSX import-lot data into a local SQLite database.
+- Imports CSV/XLSX export requirement data.
+- Shows a preview before confirmed rows are saved.
+- Matches exports to import lots by same part number, same origin, import date within 360 days, remaining quantity, and FIFO order.
+- Keeps HS-code mismatch as a warning instead of blocking the match.
+- Excludes invalidated upload batches from dashboard, inventory, matching, and report totals.
+- Downloads allocation evidence and inventory summaries as CSV/XLSX reports.
 
-`uv`가 있으면 자동으로 가상환경과 의존성을 준비합니다. `uv`가 없으면 Python 3.12 이상으로 `.venv`를 만들고 필요한 패키지를 설치합니다.
+## Who It Is For
+
+As-Is is designed for:
+
+- customs brokers reviewing 원상태수출 refund evidence,
+- trade operations teams managing part-number based import/export inventory,
+- developers exploring compliance-oriented inventory matching workflows.
+
+It is not a customs filing system and does not submit data to UNI-PASS or any government service.
+
+## Current Workflow
+
+```text
+Upload import lots
+  -> Preview and confirm rows
+  -> Upload export requirements
+  -> Preview and confirm rows
+  -> Run FIFO matching
+  -> Review inventory and allocation evidence
+  -> Download CSV/XLSX reports
+```
+
+## Matching Rules
+
+The current matcher uses:
+
+- same part number,
+- same origin,
+- import accepted date before or on the export date,
+- import accepted date within 360 days of the export date,
+- remaining quantity greater than zero,
+- FIFO order by import accepted date, declaration number, line number, and row number.
+
+If an export HS code differs from the matched import HS code, the allocation is still created with a warning. The warning is evidence for human review; it is not a final legal determination.
+
+## Data And Security Boundary
+
+By default, data stays on the machine running the app:
+
+- The default database is `sqlite:///./as_is.db`.
+- The local demo binds to `127.0.0.1:8000`.
+- Docker Compose stores SQLite data in the `as_is_data` volume.
+
+Do not upload real customer data to a public demo instance. If you adapt this project for production use, add authentication, authorization, backup policy, audit logging, encryption-at-rest decisions, and a legal review of the matching policy.
+
+## Quick Start
 
 ### macOS/Linux
 
@@ -17,60 +67,34 @@ FastAPI, SQLite, Jinja templates 기반 원상태 수출 재고/매칭 데모 �
 ./start.sh
 ```
 
-## 업로드 순서
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
-1. `/upload`에서 `samples/import_sample.csv`를 수입 데이터로 업로드하고 미리보기에서 `신규 행 저장하기`를 누릅니다.
-2. 같은 화면에서 `samples/export_contest_sample.csv`를 수출 요청으로 업로드하고 저장합니다.
-3. `/exports`에서 `선택한 조건으로 매칭하기`를 누릅니다. 날짜를 비우면 매칭 대기 중인 모든 수출 요청을 처리합니다.
-4. `/inventory`에서 수입신고별 잔량을 확인합니다.
-5. `/reports`에서 `공모전 예시 양식 출력` 또는 `전체 엑셀 파일로 내려받기`를 누릅니다.
+### Windows
 
-## 공모전 핵심 포인트
+Double-click `start.bat`, then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
-- 수출 업로드는 공모전 예시 헤더인 `Part Number`, `Description`, `U/Price`, `Ready to Ship`, `Qty`, `Amount`를 수정 없이 인식합니다.
-- 미리보기 화면에서 원본 컬럼이 내부 표준 필드에 어떻게 연결됐는지 확인할 수 있습니다.
-- 매칭 기준은 `품번 동일 + 원산지 동일 + 360일 이내 + 잔량 > 0 + FIFO`입니다.
-- HS 코드가 다르면 매칭은 진행하고 경고를 남기는 정책입니다.
-- 무효 처리된 업로드에서 생성된 본 데이터는 이후 대시보드, 재고, 매칭, 리포트 집계에서 제외됩니다.
+The start scripts prefer `uv`. If `uv` is unavailable, they create a Python virtual environment and install the project with `pip`. Python 3.12 or newer is required.
 
-## 다운로드 파일
+## Demo Data
 
-- `매칭 결과 CSV로 내려받기`: 수출 건별 수입근거를 CSV로 내려받습니다.
-- `공모전 예시 양식 출력`: `수출 전 확인용 잔량표`, `수출 건별 수입근거 자동기재표` 2개 시트로 예시 양식에 가까운 결과를 내려받습니다.
-- `전체 엑셀 파일로 내려받기`: 잔량, 매칭, 요약, 품번별 재고 요약을 포함한 상세 리포트입니다.
+Use these files for a practical end-to-end demo:
 
-## CI/CD
+- `samples/practical_imports.csv`
+- `samples/practical_exports.csv`
+- `samples/practical_import_review_cases.csv`
 
-GitHub Actions 워크플로는 `.github/workflows/ci-cd.yml`에 있습니다.
+Suggested flow:
 
-- Pull request: Python 3.12로 테스트를 실행합니다.
-- `main` push 또는 수동 실행: 테스트 통과 후 Docker 이미지를 `ghcr.io/givemethatsewon/as-is:latest`와 커밋 SHA 태그로 발행합니다.
-- 배포 Secret이 설정되어 있으면 SSH로 서버에 접속해 `origin/main`을 받은 뒤 `docker compose up -d --build`를 실행합니다.
+1. Open `/upload`.
+2. Upload `samples/practical_imports.csv` as import data and confirm the preview.
+3. Upload `samples/practical_exports.csv` as export requirements and confirm the preview.
+4. Open `/exports` and run matching. Leave the date empty to process all pending export requirements.
+5. Open `/inventory` to review remaining import quantity.
+6. Open `/reports` to download allocation and inventory reports.
 
-필요한 GitHub Actions Secret:
+To reset local demo data, stop the server and delete `as_is.db`.
 
-- `DEPLOY_HOST`: 서버 주소
-- `DEPLOY_USER`: SSH 사용자
-- `DEPLOY_SSH_KEY`: 배포용 private key
-- `DEPLOY_KNOWN_HOSTS`: 서버 host key. 로컬에서 `ssh-keyscan -H 서버주소`로 확인한 값을 사용합니다.
-- `DEPLOY_PATH`: 서버 안의 저장소 경로
-- `DEPLOY_PORT`: SSH 포트. 생략하면 `22`를 사용합니다.
-- `CLOUDFLARED_SERVICE_TOKEN_ID`, `CLOUDFLARED_SERVICE_TOKEN_SECRET`: Cloudflare Access가 서비스 토큰을 요구하는 경우에만 설정합니다.
-
-## 삭제, 저장, 무효 처리
-
-- 삭제: 저장 전 미리보기 기록만 제거합니다.
-- 저장: 미리보기에서 신규로 분류된 행을 본 데이터로 반영합니다.
-- 무효 처리: 저장 완료 업로드를 이력으로 남기되, 해당 업로드에서 생성된 본 데이터는 이후 계산과 다운로드에서 제외합니다.
-
-## 오류 대응
-
-- `Python 3.12 이상 또는 uv가 필요합니다`: Python 3.12+ 또는 `uv`를 설치한 뒤 다시 실행합니다.
-- 업로드 오류가 나면 미리보기의 `파일 컬럼 연결 결과`와 `수정이 필요한 오류`를 확인합니다.
-- 포트가 이미 사용 중이면 명령 프롬프트에서 `set PORT=8001` 실행 후 `start.bat`을 다시 실행합니다.
-- 데이터를 처음부터 다시 시연하려면 서버를 끄고 `as_is.db` 파일을 삭제한 뒤 다시 실행합니다.
-
-## 개발
+## Development
 
 ```bash
 uv venv --python 3.12
@@ -78,8 +102,64 @@ uv sync --extra test
 uv run uvicorn app.main:app --reload
 ```
 
-## 테스트
+Without `uv`:
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[test]"
+uvicorn app.main:app --reload
+```
+
+## Tests
 
 ```bash
 uv run pytest
 ```
+
+or, inside an activated virtual environment:
+
+```bash
+pytest
+```
+
+## Docker
+
+```bash
+docker compose up -d --build
+```
+
+The provided compose file expects an external Docker network named `proxy-net`, because it is intended for a reverse-proxy runtime host. For a standalone local Docker demo, either create that network first or adapt the compose file for your environment.
+
+## Reports
+
+The app can download:
+
+- export allocation evidence as CSV,
+- a contest-style workbook with inventory and allocation sheets,
+- a full workbook with inventory, matching, summary, and part-number inventory views.
+
+## CI/CD
+
+GitHub Actions runs tests on pull requests. On `main` pushes or manual runs, the workflow builds and publishes a Docker image to GitHub Container Registry. SSH deployment requires the repository deployment secrets documented in `.github/workflows/ci-cd.yml`.
+
+## Roadmap
+
+- clearer import/export template documentation,
+- reviewer-focused audit trail for matching decisions,
+- packaged local desktop shell,
+- optional encrypted local database storage,
+- production-grade authentication and authorization for hosted use.
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, tests, and pull request expectations.
+
+## Security
+
+Please do not open public issues for sensitive reports. See [SECURITY.md](SECURITY.md) for the current reporting policy and project security boundary.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
