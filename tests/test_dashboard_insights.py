@@ -8,11 +8,11 @@ from tests.helpers import add_export_requirement, add_import_lot
 
 
 def test_expiring_import_lots_returns_soonest_remaining_lots(db_session):
-    soon = add_import_lot(db_session, declaration="A", accepted=date(2025, 5, 20), origin="CN", part="PN1", qty=10)
-    later = add_import_lot(db_session, declaration="B", accepted=date(2025, 5, 30), origin="CN", part="PN2", qty=20)
+    soon = add_import_lot(db_session, declaration="A", accepted=date(2025, 5, 25), origin="CN", part="PN1", qty=10)
+    later = add_import_lot(db_session, declaration="B", accepted=date(2025, 6, 4), origin="CN", part="PN2", qty=20)
     not_soon = add_import_lot(db_session, declaration="C", accepted=date(2025, 7, 1), origin="CN", part="PN3", qty=30)
 
-    rows = expiring_import_lots(db_session, date(2026, 5, 1))
+    rows = expiring_import_lots(db_session, date(2027, 5, 1))
 
     assert [row["import_declaration_no"] for row in rows] == [soon.import_declaration_no, later.import_declaration_no]
     assert rows[0]["days_left"] == 14
@@ -66,15 +66,14 @@ def test_hs_code_warning_rows_for_dashboard(db_session):
     ]
 
 
-def test_dashboard_page_shows_customs_practitioner_insight_sections(client):
+def test_dashboard_page_shows_simple_excel_matching_entry(client):
     response = client.get("/dashboard")
 
     assert response.status_code == 200
-    assert "중요한 재고 상태만 먼저 확인합니다." in response.text
-    assert "만료 임박 재고" in response.text
-    assert "남은 수량" in response.text
-    assert "지금 매칭 가능한 재고" in response.text
-    assert "30일 안에 기한이 지나는 건" in response.text
-    assert "수리일 기준 360일 초과" in response.text
-    assert "매칭 상태" not in response.text
+    assert "Stock 차감" in response.text
+    assert "엑셀 파일 넣기" in response.text
+    assert "매칭 실행" in response.text
+    assert "결과 다운로드" in response.text
+    assert "현재 Stock 잔량" in response.text
+    assert "만료 임박 재고" not in response.text
     assert "HS 코드 확인 필요" not in response.text

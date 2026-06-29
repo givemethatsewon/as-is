@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import ExportRequirement, UploadBatch
-from app.services.matching import MATCHING_RULES_KO, run_matching
+from app.services.matching import MATCHING_RULES_KO, run_matching, undo_export_matching
 from app.services.parsing import ParseError, read_upload_rows
 from app.services.reports import allocation_rows, import_lot_rows
 from app.services.summaries import dashboard_insights, dashboard_summary, inventory_summary
@@ -56,7 +56,7 @@ def upload_page(request: Request, message: str | None = None, db: Session = Depe
 @router.post("/upload/imports/preview")
 async def import_preview_page(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
-        rows = await read_upload_rows(file)
+        rows = await read_upload_rows(file, upload_type="imports")
         result = preview_imports(db, rows, file.filename or "upload")
     except (ParseError, ValueError) as exc:
         return templates.TemplateResponse(
@@ -71,7 +71,7 @@ async def import_preview_page(request: Request, file: UploadFile = File(...), db
 @router.post("/upload/exports/preview")
 async def export_preview_page(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
-        rows = await read_upload_rows(file)
+        rows = await read_upload_rows(file, upload_type="exports")
         result = preview_exports(db, rows, file.filename or "upload")
     except (ParseError, ValueError) as exc:
         return templates.TemplateResponse(
@@ -187,6 +187,30 @@ def run_matching_page(
         f"매칭 완료 {summary.matched_count}건, 일부 매칭 {summary.partial_matched_count}건, "
         f"재고 부족 {summary.insufficient_stock_count}건"
     )
+    return templates.TemplateResponse(
+        request,
+        "exports.html",
+        {"active": "exports", "exports": exports, "message": message, "matching_rules": MATCHING_RULES_KO},
+    )
+
+
+@router.post("/exports/matching/undo")
+def undo_matching_page(
+    request: Request,
+    export_requirement_id: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        undone_count = undo_export_matching(db, export_requirement_id)
+        message = f"매칭 되돌리기 완료: {undone_count}개 수입근거를 원복했습니다."
+    except ValueError as exc:
+        message = str(exc)
+    exports = db.scalars(
+        select(ExportRequirement)
+        .outerjoin(UploadBatch, ExportRequirement.upload_batch_id == UploadBatch.id)
+        .where((ExportRequirement.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        .order_by(ExportRequirement.export_date.desc())
+    ).all()
     return templates.TemplateResponse(
         request,
         "exports.html",

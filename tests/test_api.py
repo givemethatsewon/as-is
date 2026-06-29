@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from openpyxl import load_workbook
-from sqlalchemy import func, select
+from openpyxl import Workbook, load_workbook
+from sqlalchemy import select
 
-from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch, UploadPreviewRow
+from app.models import ExportRequirement
 
 
 def test_upload_confirm_match_and_download_reports(client):
@@ -47,47 +47,188 @@ def test_upload_confirm_match_and_download_reports(client):
     assert inventory.status_code == 200
     assert inventory.json()["remaining_qty"] == 456
 
-    csv_response = client.get("/api/reports/export-allocations.csv")
-    assert csv_response.status_code == 200
-    assert "export_match_allocations.csv" in csv_response.headers["content-disposition"]
-    assert "MTG011114" in csv_response.text
-
     xlsx_response = client.get("/api/reports/download.xlsx")
     assert xlsx_response.status_code == 200
     assert xlsx_response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert "video_style_export_result.xlsx" in xlsx_response.headers["content-disposition"]
     assert xlsx_response.content.startswith(b"PK")
 
     workbook = load_workbook(BytesIO(xlsx_response.content))
-    assert "수입신고별 잔량" in workbook.sheetnames
-    sheet = workbook["수출건별 수입근거 매칭"]
-    assert sheet["A1"].value == "수출일"
+    assert workbook.sheetnames == ["수출 결과"]
+    sheet = workbook["수출 결과"]
+    assert sheet["A1"].value == "Order No"
     assert sheet["A1"].font.bold
     assert sheet["A1"].fill.fgColor.rgb == "000F5F50"
     assert sheet.freeze_panes == "A2"
     assert sheet.auto_filter.ref == sheet.dimensions
     headers = [cell.value for cell in sheet[1]]
-    match_status_column = headers.index("매칭 상태") + 1
-    assert sheet.cell(row=2, column=match_status_column).value == "매칭 완료"
-    assert "수출신고번호" not in headers
-    assert "수출수리일" not in headers
-    assert "수출 란번호" not in headers
+    assert headers[:8] == ["Order No", "Seq No", "Part Number", "Description", "U/Price", "Ready to Ship Qty", "Amount", "원산지"]
     assert "수입 란번호" in headers
     assert "수입 행번호" in headers
+    assert "수입신고번호" in headers
+    assert "수리일" in headers
+    assert "매칭 수량" in headers
+    assert "매칭 후 잔량" in headers
+    assert sheet.cell(row=2, column=headers.index("수입신고번호") + 1).value == "A"
 
-    contest_response = client.get("/api/reports/contest-example.xlsx")
-    assert contest_response.status_code == 200
-    assert contest_response.content.startswith(b"PK")
-    contest_workbook = load_workbook(BytesIO(contest_response.content))
-    assert contest_workbook.sheetnames[:2] == ["수출 전 확인용 잔량표", "수출 건별 수입근거 자동기재표"]
-    basis_sheet = contest_workbook["수출 건별 수입근거 자동기재표"]
-    basis_headers = [cell.value for cell in basis_sheet[1]]
-    assert "수입신고번호" in basis_headers
-    assert "수리일" in basis_headers
-    assert "란번호" in basis_headers
-    assert "행번호" in basis_headers
-    assert "매칭 수량" in basis_headers
-    assert "매칭 후 잔량" in basis_headers
-    assert basis_sheet.cell(row=2, column=basis_headers.index("수입신고번호") + 1).value == "A"
+
+def test_import_preview_reads_video_style_xlsm_stock_sheet(client):
+    workbook = Workbook()
+    notice = workbook.active
+    notice.title = "안내"
+    notice.append(["이 시트는 설명용입니다."])
+    stock = workbook.create_sheet("원상태진행")
+    stock.append(["원상태 수출 재고 관리"])
+    stock.append(["수입신고번호", "신고일자", "원산지", "세번", "란번호", "행번호", "판매부번", "규격", "수량", "수량단위", "잔량"])
+    stock.append(["4397824102396M", "20240724", "CN", "8708940000", "001", "29", "MTG011114", "STEERING RACK", "280", "PC", "205"])
+    content = _workbook_bytes(workbook)
+
+    response = client.post(
+        "/api/imports/preview",
+        files={
+            "file": (
+                "원상태진행 TEST 매크로.xlsm",
+                content,
+                "application/vnd.ms-excel.sheet.macroEnabled.12",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["new_count"] == 1
+    assert body["column_mapping"]["import_declaration_no"] == "수입신고번호"
+    assert body["column_mapping"]["part_number"] == "판매부번"
+    assert body["column_mapping"]["import_qty"] == "수량"
+
+
+def test_export_preview_reads_video_style_xlsm_export_sheet(client):
+    workbook = Workbook()
+    stock = workbook.active
+    stock.title = "원상태진행"
+    stock.append(["수입신고번호", "신고일자", "원산지", "세번", "란번호", "행번호", "판매부번", "규격", "수량", "수량단위"])
+    stock.append(["A", "20250116", "CN", "8708309000", "001", "01", "MTG011114", "STEERING RACK", "1256", "PC"])
+    exports = workbook.create_sheet("수출")
+    exports.append(["INVOICE RIDER"])
+    exports.append(["Order No", "Seq No", "Part Number", "Description", "U/Price", "Ready to Ship\nQty", "Amount", "원산지"])
+    exports.append(["SOTB20056-250507002-01", "1", "MTG011114", "STEERING RACK", "3.5", "800", "2800", "CN"])
+    content = _workbook_bytes(workbook)
+
+    response = client.post(
+        "/api/exports/preview",
+        files={
+            "file": (
+                "원상태 수출관리 시연.xlsm",
+                content,
+                "application/vnd.ms-excel.sheet.macroEnabled.12",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["new_count"] == 1
+    assert body["column_mapping"]["part_number"] == "Part Number"
+    assert body["column_mapping"]["required_qty"] == "Ready to Ship Qty"
+    assert body["column_mapping"]["unit_price"] == "U/Price"
+    assert body["column_mapping"]["amount"] == "Amount"
+    assert body["column_mapping"]["origin"] == "원산지"
+    assert body["column_mapping"]["order_no"] == "Order No"
+    assert body["column_mapping"]["seq_no"] == "Seq No"
+
+
+def test_matching_report_includes_no_match_row_for_shortage(client):
+    import_csv = (
+        "수입신고번호,declaration_date,원산지,HS Code,란번호,행번호,Part Number,규격,수량,수량단위\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,10,PC\n"
+    )
+    export_csv = (
+        "export_date,origin,Order No,Seq No,Part Number,Description,Qty,Amount\n"
+        "2025-08-16,CN,SOTB20056-250507002-01,1,MTG011114,STEERING RACK,15,45\n"
+    )
+
+    import_preview = client.post("/api/imports/preview", files={"file": ("imports.csv", import_csv, "text/csv")})
+    assert import_preview.status_code == 200
+    assert client.post("/api/imports/confirm", data={"batch_id": import_preview.json()["batch_id"]}).status_code == 200
+
+    export_preview = client.post("/api/exports/preview", files={"file": ("exports.csv", export_csv, "text/csv")})
+    assert export_preview.status_code == 200
+    assert client.post("/api/exports/confirm", data={"batch_id": export_preview.json()["batch_id"]}).status_code == 200
+
+    matching = client.post("/api/matching/run")
+    assert matching.status_code == 200
+    assert matching.json()["partial_matched_count"] == 1
+
+    rows = client.get("/api/reports/export-allocations").json()
+    assert len(rows) == 2
+    assert rows[0]["order_no"] == "SOTB20056-250507002-01"
+    assert rows[0]["seq_no"] == "1"
+    assert rows[0]["matched_qty"] == 10
+    assert rows[0]["remaining_qty_after"] == 0
+    assert rows[1]["order_no"] == "SOTB20056-250507002-01"
+    assert rows[1]["match_status"] == "NO MATCH"
+    assert rows[1]["matched_qty"] == 0
+    assert rows[1]["shortage_qty"] == 5
+    assert rows[1]["import_declaration_no"] == "NO MATCH"
+
+    result_response = client.get("/api/reports/download.xlsx")
+    workbook = load_workbook(BytesIO(result_response.content))
+    sheet = workbook["수출 결과"]
+    headers = [cell.value for cell in sheet[1]]
+    assert "Order No" in headers
+    assert "Seq No" in headers
+    assert "부족 수량" in headers
+    assert sheet.cell(row=3, column=headers.index("수입신고번호") + 1).value == "NO MATCH"
+    assert sheet.cell(row=3, column=headers.index("부족 수량") + 1).value == 5
+
+
+def test_api_can_undo_export_matching(client, db_session):
+    import_csv = (
+        "import_declaration_no,import_accepted_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,20,PC\n"
+    )
+    export_csv = "export_date,origin,part_number,required_qty\n2025-08-16,CN,MTG011114,8\n"
+
+    import_preview = client.post("/api/imports/preview", files={"file": ("imports.csv", import_csv, "text/csv")})
+    client.post("/api/imports/confirm", data={"batch_id": import_preview.json()["batch_id"]})
+    export_preview = client.post("/api/exports/preview", files={"file": ("exports.csv", export_csv, "text/csv")})
+    client.post("/api/exports/confirm", data={"batch_id": export_preview.json()["batch_id"]})
+    client.post("/api/matching/run")
+
+    export = db_session.scalar(select(ExportRequirement))
+    assert export is not None
+    assert client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"}).json()["remaining_qty"] == 12
+
+    response = client.post(f"/api/exports/{export.id}/matching/undo")
+
+    assert response.status_code == 200
+    assert response.json()["undone_allocation_count"] == 1
+    assert client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"}).json()["remaining_qty"] == 20
+
+
+def test_exports_page_shows_per_item_undo_action_after_matching(client):
+    import_csv = (
+        "import_declaration_no,import_accepted_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,20,PC\n"
+    )
+    export_csv = (
+        "export_date,origin,Order No,Seq No,Part Number,Qty\n"
+        "2025-08-16,CN,SOTB20056-250507002-01,1,MTG011114,8\n"
+    )
+
+    import_preview = client.post("/api/imports/preview", files={"file": ("imports.csv", import_csv, "text/csv")})
+    client.post("/api/imports/confirm", data={"batch_id": import_preview.json()["batch_id"]})
+    export_preview = client.post("/api/exports/preview", files={"file": ("exports.csv", export_csv, "text/csv")})
+    client.post("/api/exports/confirm", data={"batch_id": export_preview.json()["batch_id"]})
+    client.post("/api/matching/run")
+
+    response = client.get("/exports")
+
+    assert response.status_code == 200
+    assert "SOTB20056-250507002-01" in response.text
+    assert "Seq" in response.text
+    assert "이 건 되돌리기" in response.text
+    assert "되돌리기는 해당 수출 항목 하나만 원복합니다" in response.text
 
 
 def test_import_preview_supports_column_aliases(client):
@@ -107,6 +248,12 @@ def test_import_preview_supports_column_aliases(client):
     assert body["column_mapping"]["import_accepted_date"] == "declaration_date"
     assert body["column_mapping"]["import_declaration_no"] == "수입신고번호"
     assert body["column_mapping"]["part_number"] == "Part Number"
+
+
+def _workbook_bytes(workbook: Workbook) -> bytes:
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def test_import_preview_missing_canonical_column_reports_found_columns(client):
@@ -159,6 +306,20 @@ def test_import_preview_page_shows_canonical_field_descriptions(client):
     assert "품번 / Part Number" in response.text
 
 
+def test_upload_page_explains_video_style_excel_files(client):
+    response = client.get("/upload")
+
+    assert response.status_code == 200
+    assert "엑셀 파일 넣기" in response.text
+    assert "수입 Stock 엑셀" in response.text
+    assert "수출 엑셀" in response.text
+    assert "원상태진행" in response.text
+    assert "수출 또는 수출 양식" in response.text
+    assert "전체" not in response.text
+    assert "신규" not in response.text
+    assert "충돌" not in response.text
+
+
 def test_upload_review_detail_delete_and_invalidate_workflow(client):
     import_csv = (
         "import_declaration_no,declaration_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
@@ -173,13 +334,12 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
 
     detail = client.get(f"/upload/reviews/{batch_id}")
     assert detail.status_code == 200
-    assert "업로드 결과" in detail.text
-    assert "파일 항목 인식 결과" in detail.text
+    assert "행별 결과" in detail.text
+    assert "인식한 컬럼 보기" in detail.text
 
     upload_page = client.get("/upload")
     assert "확인" in upload_page.text
-    assert "업로드 취소" in upload_page.text
-    assert "다시 업로드" in upload_page.text
+    assert "삭제" in upload_page.text
     assert "배치" not in upload_page.text
 
     delete = client.post("/upload/delete", data={"batch_id": batch_id}, follow_redirects=False)
@@ -195,7 +355,7 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
 
     delete_confirmed = client.post("/upload/delete", data={"batch_id": confirmed_batch_id})
     assert delete_confirmed.status_code == 400
-    assert "반영 취소" in delete_confirmed.text
+    assert "무효 처리" in delete_confirmed.text
 
     invalidate = client.post(
         "/upload/invalidate",
@@ -203,10 +363,10 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
         follow_redirects=True,
     )
     assert invalidate.status_code == 200
-    assert "반영 취소" in invalidate.text
+    assert "무효 처리" in invalidate.text
 
     detail_after_invalidate = client.get(f"/upload/reviews/{confirmed_batch_id}")
-    assert "반영 취소된 파일입니다" in detail_after_invalidate.text
+    assert "무효 처리된 파일입니다" in detail_after_invalidate.text
     assert "잘못 올린 수입 파일" in detail_after_invalidate.text
 
 
@@ -292,27 +452,28 @@ def test_exports_page_shows_current_matching_rules(client):
     response = client.get("/exports")
 
     assert response.status_code == 200
-    assert "현재 매칭 기준" in response.text
+    assert "매칭 기준 보기" in response.text
     assert "품번 동일" in response.text
     assert "원산지 동일" in response.text
-    assert "360일 이내" in response.text
+    assert "720일 이내" in response.text
     assert "잔량 &gt; 0" in response.text
     assert "FIFO" in response.text
-    assert "HS 코드가 다르면 매칭은 진행하고 경고를 남깁니다" in response.text
+    assert "Description/단가/Amount는 매칭 판단에서 제외됩니다" in response.text
 
 
 def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
     response = client.get("/reports")
 
     assert response.status_code == 200
-    assert "실무에서 기본으로 쓰는 엑셀 파일을 먼저 제공합니다." in response.text
+    assert "수출 파일 기준 결과 엑셀을 다운로드합니다." in response.text
+    assert "결과 엑셀 다운로드" in response.text
+    assert "매칭 결과 CSV" not in response.text
+    assert "전체 리포트 XLSX" not in response.text
+    assert "공모전 양식 XLSX" not in response.text
     assert "수입신고별 잔량" in response.text
     assert "수출건별 매칭 결과" in response.text
-    assert "실무용 엑셀 다운로드" in response.text
-    assert "추가 다운로드 보기" in response.text
-    assert "매칭 결과 CSV" in response.text
-    assert "공모전 양식 XLSX" in response.text
-    assert "환급예상" in response.text
+    assert "부족 수량" in response.text
+    assert "Order No" in response.text
     assert "수입 재고가 없습니다" in response.text
     assert "매칭 결과가 없습니다" in response.text
 
@@ -327,43 +488,3 @@ def test_inventory_page_translates_status_filter_labels(client):
     assert "용어 보기" in response.text
     assert "수리일" in response.text
     assert "수입신고 수리일" in response.text
-
-
-def test_upload_page_can_clear_all_demo_data(client, db_session):
-    import_csv = (
-        "import_declaration_no,import_accepted_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
-        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,1256,PC\n"
-    )
-    export_csv = (
-        "export_date,origin,part_number,required_qty,description,unit_price\n"
-        "2025-08-16,CN,MTG011114,800,STEERING RACK,3\n"
-    )
-
-    import_preview = client.post("/api/imports/preview", files={"file": ("imports.csv", import_csv, "text/csv")})
-    import_batch_id = import_preview.json()["batch_id"]
-    assert client.post("/api/imports/confirm", data={"batch_id": import_batch_id}).status_code == 200
-
-    export_preview = client.post("/api/exports/preview", files={"file": ("exports.csv", export_csv, "text/csv")})
-    export_batch_id = export_preview.json()["batch_id"]
-    assert client.post("/api/exports/confirm", data={"batch_id": export_batch_id}).status_code == 200
-    assert client.post("/api/matching/run").status_code == 200
-
-    reset = client.post("/upload/reset", follow_redirects=True)
-
-    assert reset.status_code == 200
-    assert "전체 데이터를 초기화했습니다." in reset.text
-    assert "최근 업로드 파일이 없습니다." in reset.text
-    assert db_session.scalar(select(func.count(UploadBatch.id))) == 0
-    assert db_session.scalar(select(func.count(UploadPreviewRow.id))) == 0
-    assert db_session.scalar(select(func.count(ImportLot.id))) == 0
-    assert db_session.scalar(select(func.count(ExportRequirement.id))) == 0
-    assert db_session.scalar(select(func.count(ExportAllocation.id))) == 0
-
-    inventory = client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"})
-    assert inventory.status_code == 200
-    assert inventory.json()["lots"] == []
-    assert inventory.json()["remaining_qty"] == 0
-
-    allocations = client.get("/api/reports/export-allocations")
-    assert allocations.status_code == 200
-    assert allocations.json() == []

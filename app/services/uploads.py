@@ -29,6 +29,8 @@ IMPORT_REQUIRED_COLUMNS = {
 }
 EXPORT_REQUIRED_COLUMNS = {"export_date", "origin", "part_number", "required_qty"}
 EXPORT_OPTIONAL_COLUMNS = {
+    "order_no",
+    "seq_no",
     "hs_code",
     "description",
     "unit_price",
@@ -57,17 +59,32 @@ IMPORT_COLUMN_ALIASES = {
 }
 EXPORT_COLUMN_ALIASES = {
     "export_date": ["export_date", "수출일", "수출일자", "수출예정일", "Ready to Ship"],
+    "order_no": ["order_no", "Order No", "Order No.", "오더번호", "주문번호"],
+    "seq_no": ["seq_no", "Seq No", "Seq No.", "순번"],
     "origin": ["origin", "원산지"],
     "part_number": ["part_number", "Part Number", "판매부번", "품번"],
     "hs_code": ["hs_code", "HS Code", "세번", "세번코드", "HS코드", "세번부호"],
-    "required_qty": ["required_qty", "수출요청수량", "필요수량", "필요 수량", "매칭필요수량", "Qty", "Quantity"],
+    "required_qty": [
+        "required_qty",
+        "수출요청수량",
+        "필요수량",
+        "필요 수량",
+        "매칭필요수량",
+        "수출수량",
+        "Ready to Ship Qty",
+        "Ready to Ship\nQty",
+        "Qty",
+        "Quantity",
+    ],
     "description": ["description", "Description", "품명", "규격", "설명"],
     "unit_price": ["unit_price", "단가", "U/Price", "Unit Price"],
     "amount": ["amount", "Amount", "금액", "합계금액"],
 }
 CANONICAL_FIELD_DESCRIPTIONS = {
     "export_date": "수출 예정일 또는 수출일",
-    "required_qty": "수출 파일 수량",
+    "order_no": "수출 원본 Order No",
+    "seq_no": "수출 원본 순번",
+    "required_qty": "수출 요청 수량",
     "import_declaration_no": "수입신고번호",
     "import_accepted_date": "수입신고 수리일",
     "origin": "원산지",
@@ -201,6 +218,8 @@ def normalize_export_row(row: dict[str, Any]) -> dict[str, Any]:
     amount = uploaded_amount if uploaded_amount is not None else unit_price * required_qty if unit_price is not None else None
     return {
         "export_date": parse_date(row.get("export_date"), "export_date").isoformat(),
+        "order_no": optional_text(row.get("order_no")),
+        "seq_no": optional_text(row.get("seq_no")),
         "origin": clean_text(row.get("origin")).upper(),
         "part_number": clean_text(row.get("part_number")).upper(),
         "hs_code": optional_text(row.get("hs_code")),
@@ -254,10 +273,15 @@ def _is_from_invalidated_batch(db: Session, lot: ImportLot) -> bool:
 
 
 def _classify_existing_import(existing: ImportLot, payload: dict[str, Any]) -> tuple[str, str]:
-    same = _existing_import_values(existing) == _payload_import_values(payload)
+    same = (
+        existing.import_accepted_date.isoformat() == payload["import_accepted_date"]
+        and existing.hs_code == payload["hs_code"]
+        and existing.import_qty == payload["import_qty"]
+        and (existing.qty_unit or None) == payload["qty_unit"]
+    )
     if same:
-        return "duplicate", "기존 반영 데이터와 동일한 수입 건입니다."
-    return "conflict", "같은 수입 건이 이미 있지만 값이 달라 확인이 필요합니다."
+        return "duplicate", "Existing lot with the same business key and values."
+    return "conflict", "Existing lot has the same business key but different values."
 
 
 def _classify_import_for_preview(db: Session, payload: dict[str, Any]) -> tuple[str, str]:
@@ -267,32 +291,9 @@ def _classify_import_for_preview(db: Session, payload: dict[str, Any]) -> tuple[
 
     invalidated_existing = _any_existing_import_by_key(db, payload)
     if invalidated_existing and _is_from_invalidated_batch(db, invalidated_existing):
-        return "reactivate", "반영 취소된 기존 수입 건을 새 업로드 기준으로 다시 활성화합니다."
+        return "reactivate", "무효 처리된 기존 수입 건을 새 업로드 기준으로 다시 활성화합니다."
 
-    return "new", "새로 반영할 수 있는 수입 건입니다."
-
-
-def _existing_import_values(existing: ImportLot) -> tuple[str, str, str | None, int, str | None, str | None]:
-    return (
-        existing.import_accepted_date.isoformat(),
-        existing.hs_code,
-        existing.spec or None,
-        existing.import_qty,
-        existing.qty_unit or None,
-        str(existing.duty_per_unit) if existing.duty_per_unit is not None else None,
-    )
-
-
-def _payload_import_values(payload: dict[str, Any]) -> tuple[str, str, str | None, int, str | None, str | None]:
-    duty_per_unit = parse_decimal(payload.get("duty_per_unit"), "duty_per_unit")
-    return (
-        payload["import_accepted_date"],
-        payload["hs_code"],
-        payload.get("spec"),
-        payload["import_qty"],
-        payload.get("qty_unit"),
-        str(duty_per_unit) if duty_per_unit is not None else None,
-    )
+    return "new", "Ready to insert."
 
 
 def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> PreviewResult:
@@ -314,9 +315,9 @@ def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
             key = import_business_key(payload)
             if key in seen_payloads:
                 if _payload_values_match(seen_payloads[key], payload):
-                    status, message = "duplicate", "업로드 파일 안에 동일한 수입 건이 중복되어 있습니다."
+                    status, message = "duplicate", "Duplicate lot inside uploaded file."
                 else:
-                    status, message = "conflict", "업로드 파일 안에 같은 수입 건이 있지만 값이 서로 다릅니다."
+                    status, message = "conflict", "Uploaded file has the same business key with different values."
             else:
                 seen_payloads[key] = payload
                 status, message = _classify_import_for_preview(db, payload)
@@ -356,7 +357,7 @@ def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
     for index, row in enumerate(rows, start=2):
         try:
             payload = normalize_export_row(row)
-            status, message = "new", "새로 반영할 수 있는 수출 건입니다."
+            status, message = "new", "Ready to insert."
         except ValueError as exc:
             payload = {key: clean_text(value) for key, value in row.items()}
             status, message = "error", str(exc)
@@ -394,11 +395,11 @@ def _payload_values_match(left: dict[str, Any], right: dict[str, Any]) -> bool:
 def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise ValueError("업로드한 파일을 찾을 수 없습니다.")
+        raise ValueError("검토한 파일을 찾을 수 없습니다.")
     if batch.confirmed_at is not None:
-        raise ValueError("이미 반영한 파일입니다.")
+        raise ValueError("이미 저장한 파일입니다.")
     if batch.invalidated_at is not None:
-        raise ValueError("반영 취소된 파일은 다시 반영할 수 없습니다.")
+        raise ValueError("무효 처리된 파일은 저장할 수 없습니다.")
 
     inserted_count = 0
     reactivated_count = 0
@@ -438,9 +439,11 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
                 inserted_count += 1
         else:
             db.add(
-                ExportRequirement(
-                    export_date=parse_date(payload["export_date"], "export_date"),
-                    origin=payload["origin"],
+                    ExportRequirement(
+                        export_date=parse_date(payload["export_date"], "export_date"),
+                        order_no=payload.get("order_no"),
+                        seq_no=payload.get("seq_no"),
+                        origin=payload["origin"],
                     part_number=payload["part_number"],
                     hs_code=payload.get("hs_code"),
                     description=payload.get("description"),
@@ -467,7 +470,7 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
 def _reactivate_import_lot(db: Session, payload: dict[str, Any], batch_id: str) -> None:
     lot = _any_existing_import_by_key(db, payload)
     if lot is None or not _is_from_invalidated_batch(db, lot):
-        raise ValueError("재활성화할 반영 취소 수입 건을 찾을 수 없습니다.")
+        raise ValueError("재활성화할 무효 처리 수입 건을 찾을 수 없습니다.")
 
     import_qty = int(payload["import_qty"])
     lot.import_accepted_date = parse_date(payload["import_accepted_date"], "import_accepted_date")
@@ -485,9 +488,9 @@ def _reactivate_import_lot(db: Session, payload: dict[str, Any], batch_id: str) 
 def delete_unconfirmed_upload(db: Session, batch_id: str) -> None:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise ValueError("업로드한 파일을 찾을 수 없습니다.")
+        raise ValueError("검토한 파일을 찾을 수 없습니다.")
     if batch.confirmed_at is not None:
-        raise ValueError("이미 반영한 파일은 업로드 취소할 수 없습니다. 필요한 경우 반영 취소하세요.")
+        raise ValueError("이미 저장한 파일은 삭제할 수 없습니다. 필요한 경우 무효 처리하세요.")
     db.delete(batch)
     db.commit()
 
@@ -495,23 +498,17 @@ def delete_unconfirmed_upload(db: Session, batch_id: str) -> None:
 def invalidate_confirmed_upload(db: Session, batch_id: str, reason: str | None = None) -> None:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
-        raise ValueError("업로드한 파일을 찾을 수 없습니다.")
+        raise ValueError("검토한 파일을 찾을 수 없습니다.")
     if batch.confirmed_at is None:
-        raise ValueError("아직 반영하지 않은 파일은 업로드 취소할 수 있습니다.")
+        raise ValueError("아직 저장하지 않은 파일은 삭제할 수 있습니다.")
     if batch.invalidated_at is not None:
-        raise ValueError("이미 반영 취소된 파일입니다.")
+        raise ValueError("이미 무효 처리된 파일입니다.")
     batch.invalidated_at = now_utc()
-    batch.invalidated_reason = reason or "사용자가 파일 업로드 화면에서 반영 취소했습니다."
+    batch.invalidated_reason = reason or "사용자가 파일 검토 화면에서 무효 처리했습니다."
     if batch.upload_type == "imports":
         _remove_allocations_for_invalidated_import_batch(db, batch.id)
     elif batch.upload_type == "exports":
         _remove_allocations_for_invalidated_export_batch(db, batch.id)
-    db.commit()
-
-
-def clear_all_demo_data(db: Session) -> None:
-    for model in (ExportAllocation, ExportRequirement, ImportLot, UploadPreviewRow, UploadBatch):
-        db.query(model).delete()
     db.commit()
 
 

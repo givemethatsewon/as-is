@@ -3,51 +3,39 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">대시보드</p>
-    <h1>대시보드</h1>
-    <p class="supporting-copy">중요한 재고 상태만 먼저 확인합니다.</p>
+    <p class="eyebrow">엑셀 매칭</p>
+    <h1>Stock 차감</h1>
+    <p class="supporting-copy">수입/수출 엑셀을 넣고 차감 결과를 받습니다.</p>
   </div>
-  <a class="button primary" href="/upload">파일 업로드</a>
 </section>
 
-<section class="metric-grid">
-  <article class="metric"><span>남은 수량</span><strong>{{ summary.total_remaining_qty }}</strong></article>
-  <article class="metric"><span>지금 매칭 가능한 재고</span><strong>{{ summary.available_qty }}</strong></article>
-  <article class="metric caution"><span>30일 안에 기한이 지나는 건</span><strong>{{ summary.expiring_soon_lots_count }}</strong></article>
-  <article class="metric warn"><span>수리일 기준 360일 초과</span><strong>{{ summary.expired_qty }}</strong></article>
+<section class="simple-workbench" aria-label="주요 작업">
+  <a class="workbench-action primary" href="/upload">
+    <span class="step-number">1</span>
+    <span>
+      <strong>엑셀 파일 넣기</strong>
+      <small>수입 Stock 파일과 수출 파일을 업로드합니다.</small>
+    </span>
+  </a>
+  <a class="workbench-action" href="/exports">
+    <span class="step-number">2</span>
+    <span>
+      <strong>매칭 실행</strong>
+      <small>Part Number, 원산지, FIFO 기준으로 차감합니다.</small>
+    </span>
+  </a>
+  <a class="workbench-action" href="/reports">
+    <span class="step-number">3</span>
+    <span>
+      <strong>결과 다운로드</strong>
+      <small>차감 결과와 NO MATCH 내역을 엑셀로 받습니다.</small>
+    </span>
+  </a>
 </section>
 
-<section class="table-section">
-  <div class="panel-head">
-    <div>
-      <p class="eyebrow">기한 리스크</p>
-      <h2>만료 임박 재고</h2>
-    </div>
-    <span class="panel-badge">{{ insights.expiring_import_lots|length }}건</span>
-  </div>
-  <p class="table-caption">30일 안에 만료되는 잔량입니다.</p>
-  <div class="table-wrap">
-    <table class="compact-table">
-      <thead>
-        <tr>
-          <th>남은 일수</th><th>수입신고번호</th><th>품번</th><th>원산지</th><th>잔량</th><th>란/행</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for lot in insights.expiring_import_lots %}
-        <tr>
-          <td><span class="deadline-pill">{{ lot.days_left }}일</span></td>
-          <td>{{ lot.import_declaration_no }}</td>
-          <td>{{ lot.part_number }}</td>
-          <td>{{ lot.origin }}</td>
-          <td>{{ lot.remaining_qty }}</td>
-          <td>{{ lot.line_no }}/{{ lot.row_no }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6" class="empty">만료 임박 재고가 없습니다.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+<section class="simple-status" aria-label="현재 상태">
+  <p>현재 Stock 잔량 <strong>{{ summary.total_remaining_qty }}</strong></p>
+  <p>매칭된 수량 <strong>{{ summary.total_matched_qty }}</strong></p>
+  <p>매칭 가능 수량 <strong>{{ summary.available_qty }}</strong></p>
 </section>
 {% endblock %}

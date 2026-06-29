@@ -8,16 +8,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch
+from app.services.policy import EXPIRING_SOON_START_DAYS, MATCH_WINDOW_DAYS
 
 
 MATCHABLE_EXPORT_STATUSES = {"pending", "partial_matched", "insufficient_stock"}
 MATCHING_RULES_KO = [
     "품번 동일",
     "원산지 동일",
-    "수입 수리일 기준 360일 이내",
+    f"수입 수리일 기준 {MATCH_WINDOW_DAYS}일 이내",
     "잔량 > 0",
     "FIFO: 오래된 수입 건부터 차감",
-    "HS 코드가 다르면 매칭은 진행하고 경고를 남깁니다.",
+    "Description/단가/Amount는 매칭 판단에서 제외됩니다.",
 ]
 
 
@@ -38,9 +39,9 @@ def update_lot_status(lot: ImportLot, reference_date: date | None = None) -> Non
         return
 
     age_days = (reference_date - lot.import_accepted_date).days
-    if age_days > 360:
+    if age_days > MATCH_WINDOW_DAYS:
         lot.status = "expired"
-    elif age_days >= 330:
+    elif age_days >= EXPIRING_SOON_START_DAYS:
         lot.status = "expiring_soon"
     else:
         lot.status = "available"
@@ -82,6 +83,24 @@ def run_matching(db: Session, export_date: date | None = None) -> MatchingSummar
     )
 
 
+def undo_export_matching(db: Session, export_requirement_id: str) -> int:
+    export = db.get(ExportRequirement, export_requirement_id)
+    if export is None:
+        raise ValueError("수출 요청을 찾을 수 없습니다.")
+
+    allocations = list(export.allocations)
+    for allocation in allocations:
+        lot = allocation.import_lot
+        lot.used_qty = max(0, lot.used_qty - allocation.matched_qty)
+        lot.remaining_qty += allocation.matched_qty
+        update_lot_status(lot, export.export_date)
+        db.delete(allocation)
+
+    export.status = "pending"
+    db.commit()
+    return len(allocations)
+
+
 def allocate_export(db: Session, export: ExportRequirement) -> int:
     existing_matched = db.scalar(
         select(func.coalesce(func.sum(ExportAllocation.matched_qty), 0)).where(
@@ -99,7 +118,7 @@ def allocate_export(db: Session, export: ExportRequirement) -> int:
             select(ImportLot)
             .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
             .where(
-                # 공모전 핵심 조건: 품번 동일 + 원산지 동일 + 360일 이내 후보 중 잔량이 있는 건만 FIFO로 차감합니다.
+                # 핵심 조건: 품번 동일 + 원산지 동일 + 정책 기간 이내 후보 중 잔량이 있는 건만 FIFO로 차감합니다.
                 ImportLot.part_number == export.part_number,
                 ImportLot.origin == export.origin,
                 ImportLot.remaining_qty > 0,
@@ -118,7 +137,7 @@ def allocate_export(db: Session, export: ExportRequirement) -> int:
     created = 0
     for lot in candidates:
         age_days = (export.export_date - lot.import_accepted_date).days
-        if age_days > 360:
+        if age_days > MATCH_WINDOW_DAYS:
             lot.status = "expired"
             continue
         if required <= 0:

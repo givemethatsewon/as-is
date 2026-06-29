@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import ExportRequirement, UploadBatch
 from app.schemas import MatchingRunResponse, UploadConfirmResponse, UploadPreviewResponse
-from app.services.matching import run_matching
+from app.services.matching import run_matching, undo_export_matching
 from app.services.parsing import ParseError, read_upload_rows
 from app.services.reports import allocation_rows, contest_example_report_xlsx, refund_report_xlsx, rows_to_csv
 from app.services.summaries import inventory_summary
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api")
 @router.post("/imports/preview", response_model=UploadPreviewResponse)
 async def api_preview_imports(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
-        rows = await read_upload_rows(file)
+        rows = await read_upload_rows(file, upload_type="imports")
         result = preview_imports(db, rows, file.filename or "upload")
     except (ParseError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -37,7 +37,7 @@ def api_confirm_imports(batch_id: str = Form(...), db: Session = Depends(get_db)
 @router.post("/exports/preview", response_model=UploadPreviewResponse)
 async def api_preview_exports(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
-        rows = await read_upload_rows(file)
+        rows = await read_upload_rows(file, upload_type="exports")
         result = preview_exports(db, rows, file.filename or "upload")
     except (ParseError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -53,6 +53,15 @@ def api_confirm_exports(batch_id: str = Form(...), db: Session = Depends(get_db)
 def api_run_matching(export_date: date | None = None, db: Session = Depends(get_db)):
     summary = run_matching(db, export_date)
     return summary.__dict__
+
+
+@router.post("/exports/{export_requirement_id}/matching/undo")
+def api_undo_export_matching(export_requirement_id: str, db: Session = Depends(get_db)):
+    try:
+        undone_count = undo_export_matching(db, export_requirement_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"export_requirement_id": export_requirement_id, "undone_allocation_count": undone_count}
 
 
 @router.get("/inventory")
@@ -99,7 +108,7 @@ def api_report_xlsx(db: Session = Depends(get_db)):
     return Response(
         content=refund_report_xlsx(db),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="refund_report.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="video_style_export_result.xlsx"'},
     )
 
 

@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch
+from app.services.policy import EXPIRING_SOON_START_DAYS, MATCH_WINDOW_DAYS
 
 
 STATUS_LABELS = {
@@ -31,12 +32,18 @@ def dashboard_summary(db: Session) -> dict[str, int]:
     )
     total_remaining_qty = sum(lot.remaining_qty for lot in lots)
     available_qty = sum(
-        lot.remaining_qty for lot in lots if lot.remaining_qty > 0 and 0 <= (today - lot.import_accepted_date).days <= 360
+        lot.remaining_qty
+        for lot in lots
+        if lot.remaining_qty > 0 and 0 <= (today - lot.import_accepted_date).days <= MATCH_WINDOW_DAYS
     )
-    expired_qty = sum(lot.remaining_qty for lot in lots if lot.remaining_qty > 0 and (today - lot.import_accepted_date).days > 360)
+    expired_qty = sum(
+        lot.remaining_qty for lot in lots if lot.remaining_qty > 0 and (today - lot.import_accepted_date).days > MATCH_WINDOW_DAYS
+    )
     used_up_lots_count = sum(1 for lot in lots if lot.remaining_qty == 0 or lot.status == "used_up")
     expiring_soon_lots_count = sum(
-        1 for lot in lots if lot.remaining_qty > 0 and 330 <= (today - lot.import_accepted_date).days <= 360
+        1
+        for lot in lots
+        if lot.remaining_qty > 0 and EXPIRING_SOON_START_DAYS <= (today - lot.import_accepted_date).days <= MATCH_WINDOW_DAYS
     )
     return {
         "total_import_qty": total_import_qty,
@@ -66,7 +73,7 @@ def expiring_import_lots(db: Session, today: date, limit: int = 10) -> list[dict
     )
     rows = []
     for lot in lots:
-        expiry_date = lot.import_accepted_date + timedelta(days=360)
+        expiry_date = lot.import_accepted_date + timedelta(days=MATCH_WINDOW_DAYS)
         days_left = (expiry_date - today).days
         if 0 <= days_left <= 30:
             rows.append(

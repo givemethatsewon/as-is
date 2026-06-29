@@ -18,17 +18,18 @@ STATUS_LABELS = {
     "matched": "매칭 완료",
     "partial_matched": "일부 매칭",
     "insufficient_stock": "재고 부족",
-    "invalidated": "반영 취소",
-    "new": "새로 반영",
+    "NO MATCH": "NO MATCH",
+    "invalidated": "무효 처리",
+    "new": "신규",
     "reactivate": "재활성화",
-    "duplicate": "이미 있음",
-    "conflict": "값 다름",
-    "error": "수정 필요",
+    "duplicate": "중복",
+    "conflict": "확인 필요",
+    "error": "오류",
 }
 
 UPLOAD_TYPE_LABELS = {
-    "imports": "수입 파일",
-    "exports": "수출 파일",
+    "imports": "수입 데이터",
+    "exports": "수출 요청",
 }
 
 

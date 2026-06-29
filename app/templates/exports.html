@@ -3,9 +3,9 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">수출 매칭</p>
-    <h1>수출 매칭</h1>
-    <p class="supporting-copy">수출 요청을 수입 재고와 자동으로 연결합니다.</p>
+    <p class="eyebrow">매칭</p>
+    <h1>매칭 실행</h1>
+    <p class="supporting-copy">수출 항목별로 Stock을 차감합니다.</p>
   </div>
   <form class="inline-form" action="/exports/matching/run" method="post">
     <input type="date" name="export_date">
@@ -15,37 +15,45 @@
 
 {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
 
-<section class="table-section">
-  <h2>현재 매칭 기준</h2>
-  <p class="table-caption">날짜를 선택하면 해당 수출일만 처리합니다.</p>
+<details class="table-section quiet-details">
+  <summary>매칭 기준 보기</summary>
   <div class="term-list" aria-label="현재 매칭 기준">
     {% for rule in matching_rules %}
     <span class="term">{{ rule }}</span>
     {% endfor %}
   </div>
-</section>
+</details>
 
 <section class="table-section">
-  <h2>수출 요청 목록</h2>
-  <p class="table-caption">품번과 원산지가 같은 재고부터 순서대로 매칭합니다.</p>
+  <h2>수출 항목</h2>
+  <p class="table-caption">되돌리기는 해당 수출 항목 하나만 원복합니다.</p>
   <div class="table-wrap">
-    <table>
+    <table class="export-list-table">
       <thead>
         <tr>
-          <th>수출일</th><th>품번</th><th>원산지</th><th>필요 수량</th><th>설명</th><th>단가</th><th>금액</th><th>상태</th>
+          <th>수출일</th><th>Order No</th><th>Seq</th><th>품번</th><th>원산지</th><th>필요 수량</th><th>상태</th><th>작업</th>
         </tr>
       </thead>
       <tbody>
         {% for export in exports %}
         <tr>
-          <td>{{ export.export_date }}</td>
-          <td>{{ export.part_number }}</td>
-          <td>{{ export.origin }}</td>
-          <td>{{ export.required_qty }}</td>
-          <td>{{ export.description or '' }}</td>
-          <td>{{ export.unit_price or '' }}</td>
-          <td>{{ export.amount or '' }}</td>
-          <td><span class="status {{ export.status }}">{{ export.status|display_status }}</span></td>
+          <td data-label="수출일">{{ export.export_date }}</td>
+          <td data-label="Order No">{{ export.order_no or '-' }}</td>
+          <td data-label="Seq">{{ export.seq_no or '-' }}</td>
+          <td data-label="품번">{{ export.part_number }}</td>
+          <td data-label="원산지">{{ export.origin }}</td>
+          <td data-label="필요 수량">{{ export.required_qty }}</td>
+          <td data-label="상태"><span class="status {{ export.status }}">{{ export.status|display_status }}</span></td>
+          <td data-label="작업">
+            {% if export.status in ['matched', 'partial_matched'] %}
+            <form action="/exports/matching/undo" method="post">
+              <input type="hidden" name="export_requirement_id" value="{{ export.id }}">
+              <button class="button danger" type="submit">이 건 되돌리기</button>
+            </form>
+            {% else %}
+            <span class="muted">-</span>
+            {% endif %}
+          </td>
         </tr>
         {% else %}
         <tr><td colspan="8" class="empty">수출 요청이 없습니다.</td></tr>

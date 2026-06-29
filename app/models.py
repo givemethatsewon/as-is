@@ -58,6 +58,8 @@ class ExportRequirement(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     export_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    order_no: Mapped[str | None] = mapped_column(String(120))
+    seq_no: Mapped[str | None] = mapped_column(String(40))
     origin: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     part_number: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     hs_code: Mapped[str | None] = mapped_column(String(20))

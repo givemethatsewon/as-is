@@ -50,6 +50,8 @@ SHEET_CONFIG = {
         "source": "export_match_allocations",
         "headers": {
             "export_date": "수출일",
+            "order_no": "Order No",
+            "seq_no": "Seq No",
             "part_number": "품번",
             "description": "설명",
             "unit_price": "단가",
@@ -63,6 +65,7 @@ SHEET_CONFIG = {
             "line_no": "수입 란번호",
             "row_no": "수입 행번호",
             "remaining_qty_after": "매칭 후 잔량",
+            "shortage_qty": "부족 수량",
             "match_status": "매칭 상태",
             "hs_code_warning": "HS 코드 확인",
             "expected_refund_amount": "환급예상",
@@ -118,7 +121,7 @@ def import_lot_rows(db: Session) -> list[dict[str, Any]]:
 def allocation_rows(db: Session) -> list[dict[str, Any]]:
     import_batch = aliased(UploadBatch)
     export_batch = aliased(UploadBatch)
-    rows = db.execute(
+    allocation_records = db.execute(
         select(ExportRequirement, ExportAllocation, ImportLot)
         .join(ExportAllocation, ExportAllocation.export_requirement_id == ExportRequirement.id)
         .join(ImportLot, ExportAllocation.import_lot_id == ImportLot.id)
@@ -128,14 +131,48 @@ def allocation_rows(db: Session) -> list[dict[str, Any]]:
         .where((ExportRequirement.upload_batch_id.is_(None)) | (export_batch.invalidated_at.is_(None)))
         .order_by(ExportRequirement.export_date, ExportRequirement.part_number, ImportLot.import_accepted_date)
     ).all()
-    return [
+    allocations_by_export: dict[str, list[tuple[ExportAllocation, ImportLot]]] = {}
+    for export, allocation, lot in allocation_records:
+        allocations_by_export.setdefault(export.id, []).append((allocation, lot))
+
+    active_exports = db.scalars(
+        select(ExportRequirement)
+        .outerjoin(UploadBatch, ExportRequirement.upload_batch_id == UploadBatch.id)
+        .where((ExportRequirement.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        .order_by(ExportRequirement.export_date, ExportRequirement.part_number, ExportRequirement.id)
+    ).all()
+
+    rows: list[dict[str, Any]] = []
+    for export in active_exports:
+        matched_qty = 0
+        for allocation, lot in allocations_by_export.get(export.id, []):
+            matched_qty += allocation.matched_qty
+            rows.append(_allocation_report_row(export, allocation, lot))
+
+        shortage_qty = max(export.required_qty - matched_qty, 0)
+        if shortage_qty > 0 and export.status in {"partial_matched", "insufficient_stock"}:
+            rows.append(_no_match_report_row(export, shortage_qty))
+
+    return rows
+
+
+def _base_export_report_row(export: ExportRequirement) -> dict[str, Any]:
+    return {
+        "export_date": export.export_date.isoformat(),
+        "order_no": export.order_no,
+        "seq_no": export.seq_no,
+        "part_number": export.part_number,
+        "description": export.description,
+        "unit_price": export.unit_price,
+        "required_qty": export.required_qty,
+        "amount": export.amount,
+    }
+
+
+def _allocation_report_row(export: ExportRequirement, allocation: ExportAllocation, lot: ImportLot) -> dict[str, Any]:
+    row = _base_export_report_row(export)
+    row.update(
         {
-            "export_date": export.export_date.isoformat(),
-            "part_number": export.part_number,
-            "description": export.description,
-            "unit_price": export.unit_price,
-            "required_qty": export.required_qty,
-            "amount": export.amount,
             "matched_qty": allocation.matched_qty,
             "import_declaration_no": lot.import_declaration_no,
             "import_accepted_date": lot.import_accepted_date.isoformat(),
@@ -144,12 +181,34 @@ def allocation_rows(db: Session) -> list[dict[str, Any]]:
             "line_no": lot.line_no,
             "row_no": lot.row_no,
             "remaining_qty_after": allocation.remaining_qty_after,
+            "shortage_qty": 0,
             "match_status": STATUS_LABELS.get(export.status, export.status),
             "hs_code_warning": allocation.hs_code_warning,
             "expected_refund_amount": allocation.expected_refund_amount,
         }
-        for export, allocation, lot in rows
-    ]
+    )
+    return row
+
+
+def _no_match_report_row(export: ExportRequirement, shortage_qty: int) -> dict[str, Any]:
+    row = _base_export_report_row(export)
+    row.update(
+        {
+            "matched_qty": 0,
+            "import_declaration_no": "NO MATCH",
+            "import_accepted_date": "",
+            "origin": export.origin,
+            "hs_code": "",
+            "line_no": "",
+            "row_no": "",
+            "remaining_qty_after": "",
+            "shortage_qty": shortage_qty,
+            "match_status": "NO MATCH",
+            "hs_code_warning": "",
+            "expected_refund_amount": None,
+        }
+    )
+    return row
 
 
 def dashboard_rows(db: Session) -> list[dict[str, Any]]:
@@ -194,20 +253,34 @@ def rows_to_csv(rows: list[dict[str, Any]]) -> str:
 
 
 def refund_report_xlsx(db: Session) -> bytes:
+    return video_style_export_result_xlsx(db)
+
+
+def video_style_export_result_xlsx(db: Session) -> bytes:
     output = BytesIO()
-    source_rows = {
-        "import_lots_with_remaining": import_lot_rows(db),
-        "export_match_allocations": allocation_rows(db),
-        "dashboard_summary": dashboard_rows(db),
-        "inventory_summary": inventory_summary_rows(db),
+    headers = {
+        "order_no": "Order No",
+        "seq_no": "Seq No",
+        "part_number": "Part Number",
+        "description": "Description",
+        "unit_price": "U/Price",
+        "required_qty": "Ready to Ship Qty",
+        "amount": "Amount",
+        "origin": "원산지",
+        "import_declaration_no": "수입신고번호",
+        "import_accepted_date": "수리일",
+        "hs_code": "세번",
+        "line_no": "수입 란번호",
+        "row_no": "수입 행번호",
+        "matched_qty": "매칭 수량",
+        "remaining_qty_after": "매칭 후 잔량",
+        "shortage_qty": "부족 수량",
+        "match_status": "매칭 상태",
     }
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for sheet_name, config in SHEET_CONFIG.items():
-            rows = source_rows[config["source"]]
-            headers = config["headers"]
-            frame = pd.DataFrame(rows, columns=headers.keys()).rename(columns=headers)
-            frame.to_excel(writer, sheet_name=sheet_name, index=False)
-            _style_report_sheet(writer.sheets[sheet_name])
+        frame = pd.DataFrame(allocation_rows(db), columns=headers.keys()).rename(columns=headers)
+        frame.to_excel(writer, sheet_name="수출 결과", index=False)
+        _style_report_sheet(writer.sheets["수출 결과"])
     output.seek(0)
     return output.read()
 
@@ -235,6 +308,8 @@ def contest_example_report_xlsx(db: Session) -> bytes:
             allocation_rows(db),
             {
                 "export_date": "수출일",
+                "order_no": "Order No",
+                "seq_no": "Seq No",
                 "part_number": "Part Number",
                 "description": "Description",
                 "required_qty": "Qty",
@@ -247,6 +322,7 @@ def contest_example_report_xlsx(db: Session) -> bytes:
                 "row_no": "행번호",
                 "matched_qty": "매칭 수량",
                 "remaining_qty_after": "매칭 후 잔량",
+                "shortage_qty": "부족 수량",
                 "hs_code_warning": "HS 코드 확인",
             },
         ),

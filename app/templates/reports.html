@@ -5,20 +5,12 @@
   <div>
     <p class="eyebrow">다운로드</p>
     <h1>다운로드</h1>
-    <p class="supporting-copy">실무에서 기본으로 쓰는 엑셀 파일을 먼저 제공합니다.</p>
+    <p class="supporting-copy">수출 파일 기준 결과 엑셀을 다운로드합니다.</p>
   </div>
-  <div class="actions download-actions">
-    <a class="button primary" href="/api/reports/download.xlsx">실무용 엑셀 다운로드</a>
+  <div class="actions">
+    <a class="button primary" href="/api/reports/download.xlsx">결과 엑셀 다운로드</a>
   </div>
 </section>
-
-<details class="term-details secondary-downloads">
-  <summary>추가 다운로드 보기</summary>
-  <div class="actions secondary-download-list">
-    <a class="button" href="/api/reports/export-allocations.csv">매칭 결과 CSV</a>
-    <a class="button" href="/api/reports/contest-example.xlsx">공모전 양식 XLSX</a>
-  </div>
-</details>
 
 <section class="table-section">
   <h2>수입신고별 잔량</h2>
@@ -61,16 +53,19 @@
     <table>
       <thead>
         <tr>
-          <th>수출일</th><th>품번</th><th>필요 수량</th><th>매칭 수량</th><th>수입신고번호</th><th>수입수리일</th><th>원산지</th><th>HS 코드</th><th>수입 란/행</th><th>매칭 후 잔량</th><th>매칭 상태</th><th>환급예상</th>
+          <th>수출일</th><th>Order No</th><th>Seq No</th><th>품번</th><th>필요 수량</th><th>매칭 수량</th><th>부족 수량</th><th>수입신고번호</th><th>수입수리일</th><th>원산지</th><th>HS 코드</th><th>수입 란/행</th><th>매칭 후 잔량</th><th>매칭 상태</th>
         </tr>
       </thead>
       <tbody>
         {% for row in allocations %}
         <tr>
           <td>{{ row.export_date }}</td>
+          <td>{{ row.order_no or '' }}</td>
+          <td>{{ row.seq_no or '' }}</td>
           <td>{{ row.part_number }}</td>
           <td>{{ row.required_qty }}</td>
           <td>{{ row.matched_qty }}</td>
+          <td>{{ row.shortage_qty or '' }}</td>
           <td>{{ row.import_declaration_no }}</td>
           <td>{{ row.import_accepted_date }}</td>
           <td>{{ row.origin }}</td>
@@ -78,10 +73,9 @@
           <td>{{ row.line_no }}/{{ row.row_no }}</td>
           <td>{{ row.remaining_qty_after }}</td>
           <td><span class="status {{ row.match_status }}">{{ row.match_status|display_status }}</span></td>
-          <td>{{ row.expected_refund_amount or '' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="empty">매칭 결과가 없습니다.</td></tr>
+        <tr><td colspan="14" class="empty">매칭 결과가 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>

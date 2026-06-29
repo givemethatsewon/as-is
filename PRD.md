@@ -13,7 +13,7 @@
 
 ## 1. 제품 개요
 
-**처음처럼 - 원상태수출관리(As-Is)** 는 수입 후 원상태 그대로 360일 이내에 수출되는 물품의 관세환급 관리를 자동화하는 웹 프로그램이다.
+**처음처럼 - 원상태수출관리(As-Is)** 는 수입 후 원상태 그대로 프로젝트 적용 기준 720일 이내에 수출되는 물품의 관세환급 관리를 자동화하는 웹 프로그램이다.
 
 기존 업무는 엑셀 기반으로 수입신고번호, 수리일자, 원산지, HS 코드, Part Number, 수량, 잔량, 수출 매칭 정보를 수기로 관리해야 해서 오류가 발생하기 쉽다. 특히 자동차 부품처럼 품목 수가 많고 수입 건이 수만 건까지 늘어나는 경우, 담당자가 어떤 수입 건에서 어떤 수출 건을 차감했는지 추적하기 어렵다. 요구사항 문서에서도 수기 관리의 한계와 자동화된 시스템 필요성이 강조되어 있다.
 
@@ -29,7 +29,7 @@
 2. 해당 품번의 잔량이 얼마인가?
 3. 해당 품번은 지금까지 얼마나 수출되었는가?
 4. 이번 수출 물량은 어떤 수입신고 건에서 차감해야 하는가?
-5. 해당 수입 건은 360일 이내 원상태 수출 조건을 만족하는가?
+5. 해당 수입 건은 720일 이내 원상태 수출 조건을 만족하는가?
 
 요구사항상 수출 전 특정 품번의 잔량, 수출량, 사용 가능 여부를 파악할 수 있어야 한다.
 
@@ -46,7 +46,7 @@
 - 수입 재고를 품번, 원산지, HS 코드 기준으로 조회하고 싶다.
 - 수출 요청 수량을 넣으면 자동으로 어떤 수입 건에서 차감할지 알고 싶다.
 - FIFO 방식으로 먼저 들어온 재고부터 자동 차감하고 싶다.
-- 360일 초과 재고는 환급 대상에서 제외하고 싶다.
+- 720일 초과 재고는 환급 대상에서 제외하고 싶다.
 - 환급 신청용 매칭 리포트를 다운로드하고 싶다.
 
 ---
@@ -59,7 +59,7 @@
 - 수입 데이터 등록
 - 수출 요청 데이터 등록
 - 품번 + 원산지 기준 잔량 조회
-- 360일 유효기간 검증
+- 720일 유효기간 검증
 - FIFO 자동 매칭
 - 분할 수출 매칭
 - 소진 재고 처리
@@ -179,22 +179,22 @@ export_date,origin,part_number,required_qty,description,unit_price
 
 ---
 
-## FR-4. 360일 유효기간 검증
+## FR-4. 720일 유효기간 검증
 
-수입신고 수리일로부터 수출일자까지 360일 이내인 재고만 환급 가능 대상으로 본다.
+수입신고 수리일로부터 수출일자까지 프로젝트 적용 기준 720일 이내인 재고만 환급 가능 대상으로 본다.
 
 ### Rule
 
 ```text
-export_date - import_accepted_date <= 360 days
+export_date - import_accepted_date <= 720 days
 ```
 
-360일 이내 원상태 수출이어야 관세 환급 대상이 된다는 조건은 공모전 설명과 강의 녹취에서 반복적으로 설명된다.
+미팅 후 V1 기준은 2년, 즉 720일 이내 재고를 매칭 대상으로 보는 방향으로 정리한다.
 
 ### Acceptance Criteria
 
-- 360일 초과 재고는 자동 매칭 대상에서 제외한다.
-- 360일 초과 재고는 상태를 `expired`로 표시한다.
+- 720일 초과 재고는 자동 매칭 대상에서 제외한다.
+- 720일 초과 재고는 상태를 `expired`로 표시한다.
 - 30일 이내 만료 예정 재고는 `expiring_soon`으로 표시한다.
 
 ---
@@ -451,7 +451,7 @@ def allocate_export(export_req, import_lots):
 
     candidates = [
         lot for lot in candidates
-        if (export_req.export_date - lot.import_accepted_date).days <= 360
+        if (export_req.export_date - lot.import_accepted_date).days <= 720
     ]
 
     candidates.sort(key=lambda lot: (
@@ -530,7 +530,7 @@ def allocate_export(export_req, import_lots):
 - 전체 잔량
 - 사용 가능 재고
 - 소진 재고
-- 360일 초과 재고
+- 720일 초과 재고
 - 30일 이내 만료 예정 재고
 
 ---
@@ -595,7 +595,7 @@ def allocate_export(export_req, import_lots):
 ```text
 available      사용 가능
 used_up        잔량 0
-expired        360일 초과
+expired        720일 초과
 expiring_soon  30일 이내 만료 예정
 blocked        수동 차단
 ```
@@ -622,7 +622,7 @@ cancelled           취소
 | Export Date 필수 | 날짜 변환 실패 시 업로드 실패 |
 | Quantity > 0     | 수량은 1 이상                 |
 | Origin Match     | 원산지 불일치 재고 제외       |
-| 360-day Rule     | 360일 초과 재고 제외          |
+| 720-day Rule     | 720일 초과 재고 제외          |
 | FIFO             | 오래된 수입 건부터 차감       |
 | Remaining Qty    | 0 미만 불가                   |
 | Duplicate Lot    | 중복 lot 감지                 |
@@ -791,7 +791,7 @@ CN + MTG011114
 Build a web application named "처음처럼 - 원상태수출관리" with English name "As-Is".
 
 Goal:
-Create a customs refund inventory management tool for original-state re-export. Users upload import lots and export requirements as CSV/XLSX. The system validates origin, part number, HS code, 360-day eligibility, and automatically allocates export quantities to import lots using FIFO.
+Create a customs refund inventory management tool for original-state re-export. Users upload import lots and export requirements as CSV/XLSX. The system validates origin, part number, HS code, 720-day project eligibility, and automatically allocates export quantities to import lots using FIFO.
 
 Tech Stack:
 - Frontend: Next.js + TypeScript + Tailwind CSS
@@ -812,12 +812,12 @@ Core Features:
    - same part_number
    - same origin
    - import_accepted_date <= export_date
-   - export_date - import_accepted_date <= 360 days
+   - export_date - import_accepted_date <= 720 days
    - remaining_qty > 0
    - FIFO order by import_accepted_date, declaration number, line number, row number
 8. Support split allocation across multiple import lots.
 9. Mark lots as used_up when remaining_qty reaches 0.
-10. Mark lots as expired when 360-day rule fails.
+10. Mark lots as expired when 720-day project rule fails.
 11. Show dashboard summary.
 12. Show inventory search by part_number and origin.
 13. Show export matching results.
@@ -838,7 +838,7 @@ Important Business Rules:
 
 Implement:
 - Backend API first.
-- Add unit tests for FIFO, origin mismatch, 360-day expiration, split allocation, and insufficient stock.
+- Add unit tests for FIFO, origin mismatch, 720-day expiration, split allocation, and insufficient stock.
 - Then implement frontend pages:
   /upload
   /dashboard
@@ -902,7 +902,222 @@ MVP는 아래가 가능하면 성공으로 본다.
 
 ```text
 1. 같은 Part Number라도 Origin이 다르면 매칭 금지
-2. 360일 초과 lot은 매칭 금지
+2. 720일 초과 lot은 매칭 금지
 3. 먼저 수입된 lot부터 차감
 4. 부족하면 여러 lot으로 분할 매칭
 ```
+
+---
+
+## 18. 교수님 미팅 반영 Task
+
+아래 Task는 신호근 교수님 미팅 녹취, 회의 정리 PDF, 시연 영상에서 확인한 실제 요구사항을 기준으로 한다. 앞으로 구현이 끝난 항목은 `- [ ]`를 `- [x]`로 바꿔 진행 상태를 표시한다.
+
+### Phase 0: 방향 재정의
+
+- [ ] 제품 방향을 `관세환급 종합 관리 시스템`에서 `기존 엑셀 매크로를 안전하게 대체하는 stock/수출 매칭 도구`로 조정한다.
+  - 교수님 피드백상 기존 As-Is는 필요한 기능보다 고도화되어 보였다.
+  - V1은 실무자가 이미 쓰는 엑셀 흐름을 그대로 웹에서 안정적으로 재현하는 것을 목표로 한다.
+  - 증빙 파일 관리, 승인 워크플로, 환급액 자동계산, 세관 제출 자동화는 V1 핵심 범위에서 제외하거나 후순위로 둔다.
+
+- [ ] V1 성공 기준을 `엑셀 업로드 -> stock 누적 -> 수출 파일 업로드 -> FIFO 매칭 -> 결과표/잔량표 다운로드 -> 필요 시 되돌리기`로 재정의한다.
+  - 화면의 화려함보다 결과값 정확도와 엑셀 호환성을 우선한다.
+  - 교수님이 강조한 핵심은 “이 값을 넣었을 때 정확하게 stock이 깎이고 결과가 나오는 것”이다.
+
+### Phase 1: 영상 속 엑셀 파일 형식 지원
+
+- [x] `.xlsm` 업로드를 지원한다.
+  - 영상 속 파일은 매크로 포함 엑셀 형태로 보인다.
+  - 현재 CSV/XLSX 중심 업로드를 `CSV/XLSX/XLSM`까지 확장한다.
+  - 매크로 자체를 실행하지는 않고, 시트 데이터만 읽어 웹 앱 내부 로직으로 처리한다.
+
+- [x] 다중 시트 엑셀에서 영상 속 실무 시트를 자동 선택한다.
+  - 수입 stock 시트 후보: `원상태진행`, `원상태 진행`, `재고`, `수입`, `stock`, `import`.
+  - 수출 입력 시트 후보: `수출`, `수출 양식`, `invoice`, `export`.
+  - 첫 번째 시트만 읽는 방식은 실무 파일에서 실패할 수 있으므로 시트명과 헤더 점수로 대상 시트를 고른다.
+
+- [x] 제목 행/상단 설명 행이 있는 엑셀에서 실제 헤더 행을 자동 탐지한다.
+  - 영상에는 `INVOICE RIDER` 같은 제목 행이 있고, 그 아래에 실제 컬럼 헤더가 있다.
+  - 상단 20행 정도를 스캔하여 `수입신고번호`, `신고일자`, `원산지`, `세번`, `Part Number`, `Ready to Ship Qty` 등 핵심 헤더가 가장 많이 등장하는 행을 헤더로 인식한다.
+
+- [x] 영상 속 수입 stock 컬럼명을 표준 필드에 매핑한다.
+  - `수입신고번호` -> `import_declaration_no`
+  - `신고일자` 또는 `수리일` -> `import_accepted_date`
+  - `원산지` -> `origin`
+  - `세번` 또는 `HS Code` -> `hs_code`
+  - `란번호` -> `line_no`
+  - `행번호` -> `row_no`
+  - `판매부번`, `품번`, `Part Number` -> `part_number`
+  - `규격`, `Description` -> `spec`
+  - `수량` -> `import_qty`
+  - `수량단위` -> `qty_unit`
+  - `잔량`은 참고값으로만 보고, 신규 업로드 시 원본 수입수량 기준으로 내부 잔량을 계산한다.
+
+- [x] 영상 속 수출 양식 컬럼명을 표준 필드에 매핑한다.
+  - `Order No`는 추후 결과 추적용 원본 값으로 보존한다.
+  - `Part Number` -> `part_number`
+  - `Description` -> `description`
+  - `U/Price` -> `unit_price`
+  - `Ready to Ship Qty` 또는 `Qty` -> `required_qty`
+  - `Amount` -> `amount`
+  - `원산지`가 있으면 `origin`으로 사용한다.
+  - 수출 파일에 수출일이 없으면 업로드 기준일 또는 사용자가 지정한 수출일을 적용하는 UI/입력값을 제공한다.
+
+### Phase 2: 매칭 정책 수정
+
+- [x] 매칭 기준을 `Part Number + 원산지 + 잔량 + FIFO` 중심으로 단순화한다.
+  - 교수님 설명상 실무 관리의 핵심 식별자는 Part Number이며, 원산지는 반드시 구분해야 한다.
+  - `Description`, `단가`, `Amount`는 매칭 판단에서 제외한다.
+  - `Description`은 결과표 표시용으로 유지한다.
+
+- [ ] 수입 lot 고유키를 실무 기준에 맞게 강화한다.
+  - 기준: `수입신고번호 + 수리일 + 원산지 + 세번/HS Code + 란번호 + 행번호 + Part Number`.
+  - 같은 Part Number라도 수입신고번호, 수리일, 란번호, 행번호가 다르면 별도 lot으로 본다.
+  - 중복 업로드는 같은 키와 같은 값이면 중복, 같은 키와 다른 값이면 충돌로 표시한다.
+
+- [x] 기간 기준을 기존 360일에서 V1 기본 720일로 변경한다.
+  - 미팅에서 교수님은 “2년, 720일” 기준을 언급했다.
+  - 화면 문구, 매칭 로직, 테스트명, 상태 라벨의 `360일` 표현을 모두 정리한다.
+  - 가능하면 `720일`을 기본값으로 두되 설정값으로 바꿀 수 있게 한다.
+  - 법적 기준과 프로젝트 기준은 혼동하지 않도록 화면/문서에 “프로그램 적용 기준”으로 표현한다.
+
+- [x] FIFO 차감은 수입일이 빠른 lot부터 적용한다.
+  - 정렬 기준: `수리일 ASC -> 수입신고번호 ASC -> 란번호 ASC -> 행번호 ASC`.
+  - 하나의 lot 잔량이 부족하면 다음 lot으로 넘어간다.
+  - 매칭 후 각 lot의 `사용수량`, `잔량`, `상태`를 갱신한다.
+
+- [x] 수량 부족 시 음수 재고를 만들지 않는다.
+  - 부족한 행은 `NO MATCH` 또는 `재고 부족`으로 표시한다.
+  - 부족 수량을 결과표에 명확히 보여준다.
+  - 부분 매칭된 경우 매칭된 수량과 미매칭 수량을 분리해 확인할 수 있게 한다.
+
+### Phase 3: 결과표를 영상 속 엑셀과 맞추기
+
+- [x] 수출 결과표는 영상 속 `수출`/`수출 양식` 오른쪽 자동기재 영역과 최대한 같은 컬럼으로 출력한다.
+  - `수입신고번호`
+  - `수리일`
+  - `원산지`
+  - `세번`
+  - `란번호`
+  - `행번호`
+  - `사용수량`
+  - `사용 후 잔량`
+  - `상태` 또는 `NO MATCH`
+
+- [x] 분할 매칭 시 결과 행을 자동 분리한다.
+  - 예: 수출 33개, lot A 잔량 27개, lot B 잔량 6개이면 결과표에 2행을 만든다.
+  - 같은 수출 요청에서 파생된 행임을 알 수 있도록 원본 `Order No`, 순번, Part Number를 유지한다.
+  - 교수님/실무자가 기존 엑셀 매크로 결과와 비교했을 때 행 구조가 자연스러워야 한다.
+
+- [x] stock 잔량표를 언제든 다운로드할 수 있게 한다.
+  - 교수님 요구: “올해 수출 몇 개 했는지, 토탈 잔량이 몇 개인지 궁금하면 stock에서 엑셀로 다운”.
+  - 다운로드에는 수입신고번호, 수리일, 원산지, 세번, 란/행번호, Part Number, 수입수량, 사용수량, 잔량, 상태를 포함한다.
+
+- [x] 수출 매칭 결과표를 언제든 다운로드할 수 있게 한다.
+  - 다운로드 파일은 “환급 신청 확정 자료”가 아니라 “내부 검토용 매칭 근거표”로 표현한다.
+  - 단가와 Amount는 민감정보이므로 포함 여부를 정책적으로 선택할 수 있게 한다.
+
+### Phase 4: 되돌리기와 데이터 신뢰성
+
+- [ ] 매칭 실행 단위를 저장한다.
+  - 어떤 수출 파일/업로드 건에서 매칭이 실행됐는지 식별한다.
+  - 매칭 실행 시각, 실행자, 대상 수출일 또는 파일명을 기록한다.
+
+- [x] `매칭 되돌리기` 기능을 추가한다.
+  - 기존 엑셀 매크로 Pain: 한번 돌리면 원복이 어렵다.
+  - 특정 수출 파일 또는 특정 매칭 실행 단위의 allocation을 취소하고 stock 잔량을 원래대로 복구한다.
+  - 물리 삭제보다 취소/역분개 기록을 남기는 방식이 안전하다.
+
+- [x] 재실행해도 중복 차감되지 않게 한다.
+  - 이미 매칭된 수출 요청을 다시 실행하면 같은 allocation이 중복 생성되면 안 된다.
+  - 재실행이 필요하면 먼저 되돌리기 또는 명시적 재매칭 절차를 요구한다.
+
+- [ ] 업로드 이력을 파일 단위로 관리한다.
+  - 저장 전 삭제는 허용한다.
+  - 저장 후에는 삭제보다 무효 처리로 관리한다.
+  - 무효 처리 시 해당 파일에서 생성된 stock/export/allocation이 조회와 다운로드에서 제외되거나 복구되도록 한다.
+
+### Phase 5: 보안과 설치 방식
+
+- [ ] 배포 방향을 회사 내부 서버 PC 기준으로 잡는다.
+  - 교수님은 클라우드보다 회사 컴퓨터/서버에 설치하는 방식을 선호했다.
+  - 단가, Amount, 거래처 정보는 외부 유출 시 위험한 재무/영업 비밀로 본다.
+
+- [ ] 로그인 암호를 추가한다.
+  - 내부망에서 쓰더라도 암호는 필요하다는 요구가 있었다.
+  - V1에서는 복잡한 권한 분리보다 사용자 식별과 접근 제한을 우선한다.
+
+- [ ] 사용자별 행위 기록을 남긴다.
+  - 업로드한 사람
+  - 저장/무효 처리한 사람
+  - 매칭 실행한 사람
+  - 되돌리기 실행한 사람
+  - 리포트 다운로드한 사람
+  - V1에서는 최소 로그부터 시작하고, 승인자/검토자 분리는 후순위로 둔다.
+
+### Phase 6: UI 정리
+
+- [x] 첫 화면을 `stock 확인`과 `수출 매칭 실행` 중심으로 재배치한다.
+  - 현재 대시보드 중심보다 실무 흐름 중심이 적합하다.
+  - 사용자는 먼저 stock을 믿고, 다음으로 수출 파일을 넣어 결과를 확인해야 한다.
+
+- [x] 업로드 화면에 영상 속 파일 기준 안내를 추가한다.
+  - “원상태진행 시트가 있는 실무 엑셀 파일 업로드 가능”
+  - “수출 또는 수출 양식 시트가 있는 엑셀 파일 업로드 가능”
+  - “매크로는 실행하지 않고 데이터만 읽습니다”
+
+- [x] 매칭 기준 표시를 교수님 요구에 맞게 수정한다.
+  - `품번 동일`
+  - `원산지 동일`
+  - `720일 이내`
+  - `잔량 > 0`
+  - `FIFO`
+  - `Description/단가/Amount는 매칭 판단 제외`
+
+- [ ] 오류 메시지를 실무 언어로 바꾼다.
+  - `insufficient_stock` -> `재고 부족`
+  - `partial_matched` -> `일부 매칭`
+  - `NO MATCH`는 영상 속 표현과 맞춰 결과표에 표시한다.
+  - 어떤 Part Number/원산지/수량이 부족한지 바로 보여준다.
+
+### Phase 7: 검증 Task
+
+- [x] 영상 속 수입 stock 형태의 `.xlsm` 샘플 업로드 테스트를 추가한다.
+  - 제목 행이 있는 파일에서 실제 헤더 행을 찾는지 검증한다.
+  - `원상태진행` 시트를 자동 선택하는지 검증한다.
+  - 수입 lot 필드 매핑이 정확한지 검증한다.
+
+- [x] 영상 속 수출 양식 형태의 `.xlsm` 샘플 업로드 테스트를 추가한다.
+  - `수출` 또는 `수출 양식` 시트를 자동 선택하는지 검증한다.
+  - `Ready to Ship Qty`가 수출 필요수량으로 인식되는지 검증한다.
+  - `Order No`, `Part Number`, `Description`, `U/Price`, `Amount`, `원산지`가 보존/매핑되는지 검증한다.
+
+- [ ] FIFO 분할 매칭 테스트를 영상 사례에 맞춰 보강한다.
+  - 하나의 수출 수량이 여러 수입신고번호/란번호/행번호로 나뉘는지 검증한다.
+  - 결과표 행이 분할 생성되는지 검증한다.
+
+- [x] 부족 수량/NO MATCH 테스트를 추가한다.
+  - stock이 부족한 경우 음수 잔량이 생기지 않아야 한다.
+  - 결과표에는 `NO MATCH` 또는 `재고 부족`이 표시되어야 한다.
+
+- [x] 매칭 되돌리기 테스트를 추가한다.
+  - 매칭 전 stock 잔량으로 복구되는지 검증한다.
+  - 되돌린 매칭 결과가 리포트에서 제외되거나 취소 상태로 표시되는지 검증한다.
+
+- [x] 720일 기준 테스트를 추가한다.
+  - 720일 이내 lot은 매칭 가능해야 한다.
+  - 720일 초과 lot은 매칭 제외되어야 한다.
+  - 화면 문구와 테스트명이 360일 기준으로 남아 있지 않은지 확인한다.
+
+### Phase 8: 후순위 고도화
+
+- [ ] 증빙 파일 묶기 기능은 V1 이후로 분리한다.
+  - 수입신고필증, 수출신고필증, 분할증명서 등은 실제 환급/감사 대응에 중요하지만, 교수님 V1 요구는 숫자/stock/매칭 정확도에 가깝다.
+
+- [ ] 환급 예상액 계산은 V1 이후로 분리한다.
+  - 단가/Amount는 민감정보이므로 기본 매칭 기능과 분리한다.
+  - 필요 시 내부 설정으로 표시/미표시를 선택하게 한다.
+
+- [ ] 관리자 승인/검토자 권한 분리는 V1 이후로 분리한다.
+  - V1은 로그인과 사용자 식별만 우선한다.
+  - 운영 안정화 후 승인 워크플로를 추가한다.

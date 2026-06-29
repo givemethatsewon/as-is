@@ -59,7 +59,11 @@ def _ensure_batch_owner_columns() -> None:
     inspector = inspect(engine)
     table_columns = {
         "import_lots": {"upload_batch_id": "VARCHAR(36)"},
-        "export_requirements": {"upload_batch_id": "VARCHAR(36)"},
+        "export_requirements": {
+            "upload_batch_id": "VARCHAR(36)",
+            "order_no": "VARCHAR(120)",
+            "seq_no": "VARCHAR(40)",
+        },
     }
     with engine.begin() as connection:
         for table_name, columns in table_columns.items():
