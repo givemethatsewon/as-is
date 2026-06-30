@@ -12,14 +12,6 @@ from app.services.policy import EXPIRING_SOON_START_DAYS, MATCH_WINDOW_DAYS
 
 
 MATCHABLE_EXPORT_STATUSES = {"pending", "partial_matched", "insufficient_stock"}
-MATCHING_RULES_KO = [
-    "품번 동일",
-    "원산지 동일",
-    f"수입 수리일 기준 {MATCH_WINDOW_DAYS}일 이내",
-    "잔량 > 0",
-    "FIFO: 오래된 수입 건부터 차감",
-    "Description/단가/Amount는 매칭 판단에서 제외됩니다.",
-]
 
 
 @dataclass(frozen=True)

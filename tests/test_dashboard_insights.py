@@ -74,6 +74,6 @@ def test_dashboard_page_shows_simple_excel_matching_entry(client):
     assert "엑셀 파일 넣기" in response.text
     assert "매칭 실행" in response.text
     assert "결과 다운로드" in response.text
-    assert "현재 Stock 잔량" in response.text
+    assert "현재 Stock 잔량" not in response.text
     assert "만료 임박 재고" not in response.text
     assert "HS 코드 확인 필요" not in response.text

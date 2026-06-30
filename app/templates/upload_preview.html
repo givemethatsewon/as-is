@@ -42,30 +42,6 @@
   <p>오류 <strong>{{ batch.error_count }}</strong></p>
 </section>
 
-{% if column_mapping %}
-<details class="table-section quiet-details">
-  <summary>인식한 컬럼 보기</summary>
-  <div class="table-wrap detail-table">
-    <table>
-      <thead>
-        <tr><th>시스템 항목</th><th>입력 파일 컬럼</th></tr>
-      </thead>
-      <tbody>
-        {% for canonical, source in column_mapping.items() %}
-        <tr>
-          <td>
-            <span class="field-name">{{ canonical }}</span>
-            <small class="field-help">{{ field_descriptions.get(canonical, '') }}</small>
-          </td>
-          <td>{{ source }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</details>
-{% endif %}
-
 <section class="table-section">
   <h2>행별 결과</h2>
   <div class="table-wrap">

@@ -228,7 +228,7 @@ def test_exports_page_shows_per_item_undo_action_after_matching(client):
     assert "SOTB20056-250507002-01" in response.text
     assert "Seq" in response.text
     assert "이 건 되돌리기" in response.text
-    assert "되돌리기는 해당 수출 항목 하나만 원복합니다" in response.text
+    assert "되돌리기는 해당 수출 항목 하나만 원복합니다" not in response.text
 
 
 def test_import_preview_supports_column_aliases(client):
@@ -289,7 +289,7 @@ def test_export_preview_allows_optional_description_and_unit_price(client):
     assert response.json()["new_count"] == 1
 
 
-def test_import_preview_page_shows_canonical_field_descriptions(client):
+def test_import_preview_page_shows_row_results_without_column_debug_panel(client):
     import_csv = (
         "import_declaration_no,declaration_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
         "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,1256,PC\n"
@@ -301,9 +301,10 @@ def test_import_preview_page_shows_canonical_field_descriptions(client):
     )
 
     assert response.status_code == 200
-    assert "import_accepted_date" in response.text
-    assert "수입신고 수리일" in response.text
-    assert "품번 / Part Number" in response.text
+    assert "행별 결과" in response.text
+    assert "import_accepted_date" not in response.text
+    assert "수입신고 수리일" not in response.text
+    assert "품번 / Part Number" not in response.text
 
 
 def test_upload_page_explains_video_style_excel_files(client):
@@ -335,11 +336,10 @@ def test_upload_review_detail_delete_and_invalidate_workflow(client):
     detail = client.get(f"/upload/reviews/{batch_id}")
     assert detail.status_code == 200
     assert "행별 결과" in detail.text
-    assert "인식한 컬럼 보기" in detail.text
+    assert "인식한 컬럼 보기" not in detail.text
 
     upload_page = client.get("/upload")
-    assert "확인" in upload_page.text
-    assert "삭제" in upload_page.text
+    assert "최근 올린 파일" not in upload_page.text
     assert "배치" not in upload_page.text
 
     delete = client.post("/upload/delete", data={"batch_id": batch_id}, follow_redirects=False)
@@ -448,20 +448,19 @@ def test_invalidated_import_upload_can_be_reactivated_by_reupload(client):
     assert body["lots"][0]["spec"] == "STEERING RACK CORRECTED"
 
 
-def test_exports_page_shows_current_matching_rules(client):
+def test_exports_page_stays_focused_on_run_and_export_rows(client):
     response = client.get("/exports")
 
     assert response.status_code == 200
-    assert "매칭 기준 보기" in response.text
-    assert "품번 동일" in response.text
-    assert "원산지 동일" in response.text
-    assert "720일 이내" in response.text
-    assert "잔량 &gt; 0" in response.text
-    assert "FIFO" in response.text
-    assert "Description/단가/Amount는 매칭 판단에서 제외됩니다" in response.text
+    assert "매칭 실행" in response.text
+    assert "수출 항목" in response.text
+    assert "매칭 기준 보기" not in response.text
+    assert 'type="date"' not in response.text
+    assert "품번 동일" not in response.text
+    assert "Description/단가/Amount는 매칭 판단에서 제외됩니다" not in response.text
 
 
-def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
+def test_reports_page_only_exposes_result_download(client):
     response = client.get("/reports")
 
     assert response.status_code == 200
@@ -470,12 +469,11 @@ def test_reports_page_uses_clear_download_copy_and_term_explanations(client):
     assert "매칭 결과 CSV" not in response.text
     assert "전체 리포트 XLSX" not in response.text
     assert "공모전 양식 XLSX" not in response.text
-    assert "수입신고별 잔량" in response.text
-    assert "수출건별 매칭 결과" in response.text
-    assert "부족 수량" in response.text
-    assert "Order No" in response.text
-    assert "수입 재고가 없습니다" in response.text
-    assert "매칭 결과가 없습니다" in response.text
+    assert "수입신고별 잔량" not in response.text
+    assert "수출건별 매칭 결과" not in response.text
+    assert "부족 수량" not in response.text
+    assert "수입 재고가 없습니다" not in response.text
+    assert "매칭 결과가 없습니다" not in response.text
 
 
 def test_inventory_page_translates_status_filter_labels(client):

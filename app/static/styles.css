@@ -225,6 +225,7 @@ h2 {
 .simple-workbench {
   display: grid;
   gap: 0;
+  grid-template-columns: 1fr;
   margin-bottom: 14px;
 }
 
@@ -613,43 +614,6 @@ button:disabled {
   overflow: hidden;
 }
 
-.quiet-details {
-  padding: 0;
-}
-
-.quiet-details summary {
-  color: var(--accent-dark);
-  cursor: pointer;
-  font-weight: 850;
-  padding: 17px 18px;
-}
-
-.detail-table {
-  border-top: 1px solid var(--line);
-}
-
-.section-head {
-  align-items: flex-start;
-  display: flex;
-  gap: 18px;
-  justify-content: space-between;
-  padding: 18px 18px 0;
-}
-
-.section-head h2 {
-  padding: 0;
-}
-
-.policy-note {
-  background: rgba(0, 109, 91, 0.06);
-  border: 1px solid rgba(0, 109, 91, 0.16);
-  color: var(--accent-dark);
-  line-height: 1.45;
-  margin: 0;
-  max-width: 360px;
-  padding: 10px 12px;
-}
-
 .table-section h2 {
   padding: 18px 18px 0;
 }
@@ -745,36 +709,6 @@ tbody tr:hover {
   display: grid;
   gap: 8px;
   margin: 0;
-}
-
-.payload-item {
-  align-items: start;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(150px, 0.42fr) minmax(180px, 1fr);
-}
-
-.payload-item dt {
-  color: var(--muted);
-  font-weight: 800;
-}
-
-.payload-item dt span,
-.payload-item dt small {
-  display: block;
-}
-
-.payload-item dt small {
-  font-size: 11px;
-  font-weight: 600;
-  margin-top: 2px;
-}
-
-.payload-item dd {
-  background: #f8faf6;
-  border: 1px solid var(--line);
-  margin: 0;
-  padding: 6px 8px;
 }
 
 .field-name,
@@ -962,14 +896,6 @@ tbody tr:hover {
   }
 
   .workflow-steps {
-    grid-template-columns: 1fr;
-  }
-
-  .section-head {
-    flex-direction: column;
-  }
-
-  .payload-item {
     grid-template-columns: 1fr;
   }
 

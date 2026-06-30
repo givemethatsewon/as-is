@@ -8,25 +8,14 @@
     <p class="supporting-copy">수출 항목별로 Stock을 차감합니다.</p>
   </div>
   <form class="inline-form" action="/exports/matching/run" method="post">
-    <input type="date" name="export_date">
     <button class="button primary" type="submit">매칭 실행</button>
   </form>
 </section>
 
 {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
 
-<details class="table-section quiet-details">
-  <summary>매칭 기준 보기</summary>
-  <div class="term-list" aria-label="현재 매칭 기준">
-    {% for rule in matching_rules %}
-    <span class="term">{{ rule }}</span>
-    {% endfor %}
-  </div>
-</details>
-
 <section class="table-section">
   <h2>수출 항목</h2>
-  <p class="table-caption">되돌리기는 해당 수출 항목 하나만 원복합니다.</p>
   <div class="table-wrap">
     <table class="export-list-table">
       <thead>

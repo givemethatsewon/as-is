@@ -10,14 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import ExportRequirement, UploadBatch
-from app.services.matching import MATCHING_RULES_KO, run_matching, undo_export_matching
+from app.services.matching import run_matching, undo_export_matching
 from app.services.parsing import ParseError, read_upload_rows
-from app.services.reports import allocation_rows, import_lot_rows
 from app.services.summaries import dashboard_insights, dashboard_summary, inventory_summary
 from app.services.uploads import (
-    CANONICAL_FIELD_DESCRIPTIONS,
-    clear_all_demo_data,
-    column_mapping_for_batch,
     confirm_batch,
     delete_unconfirmed_upload,
     invalidate_confirmed_upload,
@@ -44,13 +40,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/upload")
-def upload_page(request: Request, message: str | None = None, db: Session = Depends(get_db)):
-    batches = db.scalars(select(UploadBatch).order_by(UploadBatch.created_at.desc()).limit(8)).all()
-    return templates.TemplateResponse(
-        request,
-        "upload.html",
-        {"active": "upload", "batches": batches, "message": message},
-    )
+def upload_page(request: Request, message: str | None = None):
+    return templates.TemplateResponse(request, "upload.html", {"active": "upload", "message": message})
 
 
 @router.post("/upload/imports/preview")
@@ -62,10 +53,10 @@ async def import_preview_page(request: Request, file: UploadFile = File(...), db
         return templates.TemplateResponse(
             request,
             "upload.html",
-            {"active": "upload", "error": str(exc), "batches": []},
+            {"active": "upload", "error": str(exc)},
             status_code=400,
         )
-    return _preview_template(request, result.batch, result.column_mapping)
+    return _preview_template(request, result.batch)
 
 
 @router.post("/upload/exports/preview")
@@ -77,10 +68,10 @@ async def export_preview_page(request: Request, file: UploadFile = File(...), db
         return templates.TemplateResponse(
             request,
             "upload.html",
-            {"active": "upload", "error": str(exc), "batches": []},
+            {"active": "upload", "error": str(exc)},
             status_code=400,
         )
-    return _preview_template(request, result.batch, result.column_mapping)
+    return _preview_template(request, result.batch)
 
 
 @router.get("/upload/reviews/{batch_id}")
@@ -88,7 +79,7 @@ def upload_review_detail_page(request: Request, batch_id: str, db: Session = Dep
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail="검토한 파일을 찾을 수 없습니다.")
-    return _preview_template(request, batch, column_mapping_for_batch(batch))
+    return _preview_template(request, batch)
 
 
 @router.post("/upload/confirm")
@@ -120,13 +111,7 @@ def invalidate_upload_page(batch_id: str = Form(...), reason: str | None = Form(
         invalidate_confirmed_upload(db, batch_id, reason)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _upload_redirect("반영을 취소했습니다.")
-
-
-@router.post("/upload/reset")
-def reset_all_data_page(db: Session = Depends(get_db)):
-    clear_all_demo_data(db)
-    return _upload_redirect("전체 데이터를 초기화했습니다.")
+    return _upload_redirect("무효 처리했습니다.")
 
 
 @router.get("/inventory")
@@ -166,7 +151,7 @@ def exports_page(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request,
         "exports.html",
-        {"active": "exports", "exports": exports, "message": None, "matching_rules": MATCHING_RULES_KO},
+        {"active": "exports", "exports": exports, "message": None},
     )
 
 
@@ -190,7 +175,7 @@ def run_matching_page(
     return templates.TemplateResponse(
         request,
         "exports.html",
-        {"active": "exports", "exports": exports, "message": message, "matching_rules": MATCHING_RULES_KO},
+        {"active": "exports", "exports": exports, "message": message},
     )
 
 
@@ -214,22 +199,16 @@ def undo_matching_page(
     return templates.TemplateResponse(
         request,
         "exports.html",
-        {"active": "exports", "exports": exports, "message": message, "matching_rules": MATCHING_RULES_KO},
+        {"active": "exports", "exports": exports, "message": message},
     )
 
 
 @router.get("/reports")
-def reports_page(request: Request, db: Session = Depends(get_db)):
-    allocation_preview = allocation_rows(db)
-    import_lot_preview = import_lot_rows(db)
-    return templates.TemplateResponse(
-        request,
-        "reports.html",
-        {"active": "reports", "allocations": allocation_preview, "import_lots": import_lot_preview},
-    )
+def reports_page(request: Request):
+    return templates.TemplateResponse(request, "reports.html", {"active": "reports"})
 
 
-def _preview_template(request: Request, batch: UploadBatch, column_mapping: dict[str, str]):
+def _preview_template(request: Request, batch: UploadBatch):
     reactivate_count = sum(1 for row in batch.rows if row.row_status == "reactivate")
     return templates.TemplateResponse(
         request,
@@ -239,8 +218,6 @@ def _preview_template(request: Request, batch: UploadBatch, column_mapping: dict
             "batch": batch,
             "rows": batch.rows,
             "reactivate_count": reactivate_count,
-            "column_mapping": column_mapping,
-            "field_descriptions": CANONICAL_FIELD_DESCRIPTIONS,
         },
     )
 
