@@ -49,7 +49,8 @@ HEADER_HINTS = {
         "사용수량",
     ),
 }
-EXPORT_DATE_HEADERS = {"export_date", "수출일", "수출일자", "수출예정일", "ready to ship", "shipping date"}
+EXPORT_DATE_HEADERS = {"export_date", "수출일", "수출일자", "수출예정일", "shipping date", "invoice date"}
+SUBHEADER_HINTS = {"qty", "amount", "수량", "금액"}
 
 
 async def read_upload_rows(file: UploadFile, upload_type: str | None = None) -> list[dict[str, Any]]:
@@ -108,8 +109,8 @@ def _best_header_row(frame: pd.DataFrame, upload_type: str | None) -> tuple[int,
 
 
 def _table_from_header(frame: pd.DataFrame, header_row: int) -> pd.DataFrame:
-    raw_headers = [_clean_header(value) for value in frame.iloc[header_row].tolist()]
-    data = frame.iloc[header_row + 1 :].copy()
+    raw_headers, data_start = _headers_from_row(frame, header_row)
+    data = frame.iloc[data_start:].copy()
     keep_indices = [index for index, header in enumerate(raw_headers) if header]
     headers = [_dedupe_header(raw_headers[index], raw_headers[:index]) for index in keep_indices]
 
@@ -120,6 +121,35 @@ def _table_from_header(frame: pd.DataFrame, header_row: int) -> pd.DataFrame:
     data.columns = headers
     data = data.replace("", pd.NA).dropna(how="all").fillna("")
     return data
+
+
+def _headers_from_row(frame: pd.DataFrame, header_row: int) -> tuple[list[str], int]:
+    primary = [_clean_header(value) for value in frame.iloc[header_row].tolist()]
+    if header_row + 1 >= len(frame.index):
+        return primary, header_row + 1
+
+    secondary = [_clean_header(value) for value in frame.iloc[header_row + 1].tolist()]
+    if not _looks_like_subheader_row(secondary):
+        return primary, header_row + 1
+
+    headers: list[str] = []
+    last_primary = ""
+    for main, sub in zip(primary, secondary, strict=False):
+        if main:
+            last_primary = main
+        if main and sub:
+            headers.append(f"{main} {sub}")
+        elif main:
+            headers.append(main)
+        elif sub:
+            headers.append(sub if not last_primary else sub)
+        else:
+            headers.append("")
+    return headers, header_row + 2
+
+
+def _looks_like_subheader_row(cells: list[str]) -> bool:
+    return any(_normalize_header(cell) in SUBHEADER_HINTS for cell in cells if cell)
 
 
 def _sheet_score(sheet_name: str, upload_type: str | None) -> int:
@@ -190,6 +220,19 @@ def parse_positive_int(value: Any, field: str) -> int:
         raise ValueError(f"{field} must be numeric.") from exc
     if number <= 0 or number != number.to_integral_value():
         raise ValueError(f"{field} must be a positive integer.")
+    return int(number)
+
+
+def parse_non_negative_int(value: Any, field: str) -> int:
+    text = clean_text(value).replace(",", "")
+    if not text:
+        raise ValueError(f"{field} is required.")
+    try:
+        number = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError(f"{field} must be numeric.") from exc
+    if number < 0 or number != number.to_integral_value():
+        raise ValueError(f"{field} must be a non-negative integer.")
     return int(number)
 
 

@@ -5,7 +5,7 @@ from io import BytesIO
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 
-from app.models import ExportRequirement
+from app.models import ExportRequirement, ImportLot
 
 
 def test_upload_confirm_match_and_download_reports(client):
@@ -72,7 +72,7 @@ def test_upload_confirm_match_and_download_reports(client):
     assert sheet.cell(row=2, column=headers.index("수입신고번호") + 1).value == "A"
 
 
-def test_import_preview_reads_video_style_xlsm_stock_sheet(client):
+def test_import_preview_reads_video_style_xlsm_stock_sheet(client, db_session):
     workbook = Workbook()
     notice = workbook.active
     notice.title = "안내"
@@ -100,6 +100,16 @@ def test_import_preview_reads_video_style_xlsm_stock_sheet(client):
     assert body["column_mapping"]["import_declaration_no"] == "수입신고번호"
     assert body["column_mapping"]["part_number"] == "판매부번"
     assert body["column_mapping"]["import_qty"] == "수량"
+    assert body["column_mapping"]["remaining_qty"] == "잔량"
+
+    confirm = client.post("/api/imports/confirm", data={"batch_id": body["batch_id"]})
+
+    assert confirm.status_code == 200
+    lot = db_session.scalar(select(ImportLot))
+    assert lot is not None
+    assert lot.import_qty == 280
+    assert lot.used_qty == 75
+    assert lot.remaining_qty == 205
 
 
 def test_export_preview_reads_video_style_xlsm_export_sheet(client):
@@ -135,6 +145,40 @@ def test_export_preview_reads_video_style_xlsm_export_sheet(client):
     assert body["column_mapping"]["origin"] == "원산지"
     assert body["column_mapping"]["order_no"] == "Order No"
     assert body["column_mapping"]["seq_no"] == "Seq No"
+
+
+def test_export_preview_reads_invoice_rider_two_line_header_and_infers_origin(client):
+    import_workbook = Workbook()
+    stock = import_workbook.active
+    stock.title = "원상태진행"
+    stock.append(["수입신고번호", "신고일자", "원산지", "세번", "란번호", "행번호", "Part Number", "규격", "수량", "수량단위", "잔량 수량"])
+    stock.append(["A", "20250116", "ID", "8708309000", "001", "01", "MBF01CRK936", "BRAKE PAD", "40", "PC", "0"])
+    import_preview = client.post(
+        "/api/imports/preview",
+        files={"file": ("stock.xlsm", _workbook_bytes(import_workbook), "application/vnd.ms-excel.sheet.macroEnabled.12")},
+    )
+    client.post("/api/imports/confirm", data={"batch_id": import_preview.json()["batch_id"]})
+
+    export_workbook = Workbook()
+    rider = export_workbook.active
+    rider.title = "Invoice Rider"
+    rider.append(["INVOICE RIDER"])
+    rider.append(["#", "Order No.", "Sys No.", "Part Number", "Description", "U/Price", "Ready to Ship", ""])
+    rider.append(["", "", "", "", "", "", " Qty ", "Amount"])
+    rider.append(["1", "SOHB20016-250421002-01", "1", "MBF01CRK936", "BRAKE PAD", "5.45", "40", "218"])
+
+    response = client.post(
+        "/api/exports/preview",
+        files={"file": ("CIHB20016-260616001 환급.xlsx", _workbook_bytes(export_workbook), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["new_count"] == 1
+    assert body["error_count"] == 0
+    assert body["column_mapping"]["required_qty"] == "Ready to Ship Qty"
+    assert body["column_mapping"]["amount"] == "Amount"
+    assert body["column_mapping"]["seq_no"] == "Sys No."
 
 
 def test_matching_report_includes_no_match_row_for_shortage(client):

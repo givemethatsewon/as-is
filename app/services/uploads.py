@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch, UploadPreviewRow, now_utc
 from app.services.matching import update_lot_status
-from app.services.parsing import clean_text, optional_text, parse_date, parse_decimal, parse_positive_int
+from app.services.parsing import clean_text, optional_text, parse_date, parse_decimal, parse_non_negative_int, parse_positive_int
 
 
 IMPORT_REQUIRED_COLUMNS = {
@@ -27,10 +27,11 @@ IMPORT_REQUIRED_COLUMNS = {
     "import_qty",
     "qty_unit",
 }
-EXPORT_REQUIRED_COLUMNS = {"export_date", "origin", "part_number", "required_qty"}
+EXPORT_REQUIRED_COLUMNS = {"export_date", "part_number", "required_qty"}
 EXPORT_OPTIONAL_COLUMNS = {
     "order_no",
     "seq_no",
+    "origin",
     "hs_code",
     "description",
     "unit_price",
@@ -55,12 +56,13 @@ IMPORT_COLUMN_ALIASES = {
     "part_number": ["part_number", "Part Number", "판매부번", "품번"],
     "spec": ["spec", "규격", "규격2", "description", "Description"],
     "import_qty": ["import_qty", "quantity", "qty", "수량", "수량_1"],
+    "remaining_qty": ["remaining_qty", "remaining", "잔량", "잔량 수량", "잔량수량", "남은 수량"],
     "qty_unit": ["qty_unit", "unit", "수량단위", "수량단위_1"],
 }
 EXPORT_COLUMN_ALIASES = {
-    "export_date": ["export_date", "수출일", "수출일자", "수출예정일", "Ready to Ship"],
+    "export_date": ["export_date", "수출일", "수출일자", "수출예정일", "Shipping Date", "Invoice Date"],
     "order_no": ["order_no", "Order No", "Order No.", "오더번호", "주문번호"],
-    "seq_no": ["seq_no", "Seq No", "Seq No.", "순번"],
+    "seq_no": ["seq_no", "Seq No", "Seq No.", "Sys No", "Sys No.", "순번"],
     "origin": ["origin", "원산지"],
     "part_number": ["part_number", "Part Number", "판매부번", "품번"],
     "hs_code": ["hs_code", "HS Code", "세번", "세번코드", "HS코드", "세번부호"],
@@ -73,6 +75,7 @@ EXPORT_COLUMN_ALIASES = {
         "수출수량",
         "Ready to Ship Qty",
         "Ready to Ship\nQty",
+        "Ready to Ship Qty ",
         "Qty",
         "Quantity",
     ],
@@ -94,6 +97,7 @@ CANONICAL_FIELD_DESCRIPTIONS = {
     "part_number": "품번 / Part Number",
     "spec": "규격 또는 품명",
     "import_qty": "수입 수량",
+    "remaining_qty": "잔량 수량",
     "qty_unit": "수량 단위",
     "description": "수출 품명 또는 설명",
     "unit_price": "수출 단가",
@@ -142,7 +146,8 @@ def normalize_import_columns(rows: list[dict[str, Any]]) -> tuple[list[dict[str,
             "Missing required canonical columns: "
             f"{', '.join(missing)}. Found columns: {', '.join(columns)}"
         )
-    mapping_preview = {canonical: source_by_canonical[canonical] for canonical in sorted(IMPORT_REQUIRED_COLUMNS)}
+    mapped_columns = sorted((IMPORT_REQUIRED_COLUMNS | {"remaining_qty"}) & set(source_by_canonical))
+    mapping_preview = {canonical: source_by_canonical[canonical] for canonical in mapped_columns}
     return normalized_rows, mapping_preview
 
 
@@ -196,6 +201,13 @@ def _alias_lookup(alias_map: dict[str, list[str]]) -> dict[str, str]:
 
 def normalize_import_row(row: dict[str, Any]) -> dict[str, Any]:
     import_qty = parse_positive_int(row.get("import_qty"), "import_qty")
+    remaining_qty = (
+        parse_non_negative_int(row.get("remaining_qty"), "remaining_qty")
+        if clean_text(row.get("remaining_qty"))
+        else import_qty
+    )
+    if remaining_qty > import_qty:
+        raise ValueError("remaining_qty must be less than or equal to import_qty.")
     return {
         "import_declaration_no": clean_text(row.get("import_declaration_no")),
         "import_accepted_date": parse_date(row.get("import_accepted_date"), "import_accepted_date").isoformat(),
@@ -206,6 +218,7 @@ def normalize_import_row(row: dict[str, Any]) -> dict[str, Any]:
         "part_number": clean_text(row.get("part_number")).upper(),
         "spec": optional_text(row.get("spec")),
         "import_qty": import_qty,
+        "remaining_qty": remaining_qty,
         "qty_unit": optional_text(row.get("qty_unit")),
         "duty_per_unit": parse_decimal(row.get("duty_per_unit"), "duty_per_unit"),
     }
@@ -291,24 +304,26 @@ def _classify_import_for_preview(db: Session, payload: dict[str, Any]) -> tuple[
     return "new", "Ready to insert."
 
 
-def _existing_import_values(existing: ImportLot) -> tuple[str, str, str | None, int, str | None, str | None]:
+def _existing_import_values(existing: ImportLot) -> tuple[str, str, str | None, int, int, str | None, str | None]:
     return (
         existing.import_accepted_date.isoformat(),
         existing.hs_code,
         existing.spec or None,
         existing.import_qty,
+        existing.remaining_qty,
         existing.qty_unit or None,
         str(existing.duty_per_unit) if existing.duty_per_unit is not None else None,
     )
 
 
-def _payload_import_values(payload: dict[str, Any]) -> tuple[str, str, str | None, int, str | None, str | None]:
+def _payload_import_values(payload: dict[str, Any]) -> tuple[str, str, str | None, int, int, str | None, str | None]:
     duty_per_unit = parse_decimal(payload.get("duty_per_unit"), "duty_per_unit")
     return (
         payload["import_accepted_date"],
         payload["hs_code"],
         payload.get("spec"),
         payload["import_qty"],
+        payload["remaining_qty"],
         payload.get("qty_unit"),
         str(duty_per_unit) if duty_per_unit is not None else None,
     )
@@ -375,6 +390,8 @@ def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
     for index, row in enumerate(rows, start=2):
         try:
             payload = normalize_export_row(row)
+            if not payload["origin"]:
+                payload["origin"] = _infer_origin_for_export(db, payload["part_number"])
             status, message = "new", "Ready to insert."
         except ValueError as exc:
             payload = {key: clean_text(value) for key, value in row.items()}
@@ -395,6 +412,24 @@ def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
     db.commit()
     db.refresh(batch)
     return PreviewResult(batch=batch, warnings=[], column_mapping=column_mapping)
+
+
+def _infer_origin_for_export(db: Session, part_number: str) -> str:
+    origins = set(
+        db.scalars(
+            select(ImportLot.origin)
+            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+            .where(
+                ImportLot.part_number == part_number,
+                (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
+            )
+        ).all()
+    )
+    if len(origins) == 1:
+        return origins.pop()
+    if not origins:
+        raise ValueError(f"origin is required because no remaining import stock was found for {part_number}.")
+    raise ValueError(f"origin is required because multiple origins exist for {part_number}: {', '.join(sorted(origins))}.")
 
 
 def _apply_status_counts(batch: UploadBatch, statuses: Counter[str]) -> None:
@@ -447,10 +482,10 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
                         spec=payload.get("spec"),
                         import_qty=payload["import_qty"],
                         qty_unit=payload.get("qty_unit"),
-                        used_qty=0,
-                        remaining_qty=payload["import_qty"],
+                        used_qty=payload["import_qty"] - payload["remaining_qty"],
+                        remaining_qty=payload["remaining_qty"],
                         duty_per_unit=parse_decimal(payload.get("duty_per_unit"), "duty_per_unit"),
-                        status="available",
+                        status="used_up" if payload["remaining_qty"] == 0 else "available",
                         upload_batch_id=batch.id,
                     )
                 )
@@ -491,15 +526,16 @@ def _reactivate_import_lot(db: Session, payload: dict[str, Any], batch_id: str) 
         raise ValueError("재활성화할 무효 처리 수입 건을 찾을 수 없습니다.")
 
     import_qty = int(payload["import_qty"])
+    remaining_qty = int(payload["remaining_qty"])
     lot.import_accepted_date = parse_date(payload["import_accepted_date"], "import_accepted_date")
     lot.hs_code = payload["hs_code"]
     lot.spec = payload.get("spec")
     lot.import_qty = import_qty
     lot.qty_unit = payload.get("qty_unit")
-    lot.used_qty = 0
-    lot.remaining_qty = import_qty
+    lot.used_qty = import_qty - remaining_qty
+    lot.remaining_qty = remaining_qty
     lot.duty_per_unit = parse_decimal(payload.get("duty_per_unit"), "duty_per_unit")
-    lot.status = "available"
+    lot.status = "used_up" if remaining_qty == 0 else "available"
     lot.upload_batch_id = batch_id
 
 

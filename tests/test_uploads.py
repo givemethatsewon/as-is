@@ -111,10 +111,10 @@ def test_import_preview_treats_spec_difference_as_conflict(db_session):
 def test_export_preview_supports_contest_sample_headers(db_session):
     rows = [
         {
+            "export_date": "2025-08-16",
             "Part Number": "MTG011114",
             "Description": "STEERING RACK",
             "U/Price": "3.5",
-            "Ready to Ship": "2025-08-16",
             "Qty": "800",
             "Amount": "2800",
             "원산지": "CN",
@@ -129,7 +129,7 @@ def test_export_preview_supports_contest_sample_headers(db_session):
     assert result.column_mapping["part_number"] == "Part Number"
     assert result.column_mapping["description"] == "Description"
     assert result.column_mapping["unit_price"] == "U/Price"
-    assert result.column_mapping["export_date"] == "Ready to Ship"
+    assert result.column_mapping["export_date"] == "export_date"
     assert result.column_mapping["required_qty"] == "Qty"
     assert result.column_mapping["amount"] == "Amount"
     assert result.column_mapping["hs_code"] == "세번"
