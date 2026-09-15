@@ -12,27 +12,31 @@
 {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
 {% if error %}<p class="notice danger">{{ error }}</p>{% endif %}
 
+<form class="direct-match-form" action="/upload/match" method="post" enctype="multipart/form-data">
 <section class="split" id="upload-forms">
-  <form class="panel" action="/upload/imports/preview" method="post" enctype="multipart/form-data">
+  <section class="panel">
     <h2>1. 수입 Stock 엑셀</h2>
     <p class="muted">원상태진행 시트가 있는 파일을 넣습니다.</p>
     <label class="file-picker">
-      <input class="file-picker-input" type="file" name="file" accept=".csv,.xlsx,.xlsm" required>
+      <input class="file-picker-input" type="file" name="import_file" accept=".csv,.xlsx,.xlsm" required>
       <span class="file-picker-button">파일 선택</span>
       <span class="file-picker-name">선택된 파일 없음</span>
     </label>
-    <button class="button primary" type="submit">수입 파일 업로드</button>
-  </form>
+  </section>
 
-  <form class="panel" action="/upload/exports/preview" method="post" enctype="multipart/form-data">
+  <section class="panel">
     <h2>2. 수출 엑셀</h2>
     <p class="muted">수출 또는 수출 양식 시트가 있는 파일을 넣습니다.</p>
     <label class="file-picker">
-      <input class="file-picker-input" type="file" name="file" accept=".csv,.xlsx,.xlsm" required>
+      <input class="file-picker-input" type="file" name="export_file" accept=".csv,.xlsx,.xlsm" required>
       <span class="file-picker-button">파일 선택</span>
       <span class="file-picker-name">선택된 파일 없음</span>
     </label>
-    <button class="button primary" type="submit">수출 파일 업로드</button>
-  </form>
+  </section>
 </section>
+  <div class="direct-match-actions">
+    <button class="button primary" type="submit">두 파일로 바로 매칭 실행</button>
+    <p class="muted">두 파일을 확인해 저장한 뒤 FIFO 매칭 결과를 바로 보여줍니다.</p>
+  </div>
+</form>
 {% endblock %}

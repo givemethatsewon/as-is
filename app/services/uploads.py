@@ -53,18 +53,18 @@ IMPORT_COLUMN_ALIASES = {
     "hs_code": ["hs_code", "HS Code", "세번", "세번코드"],
     "line_no": ["line_no", "란번호", "란번", "란번호2"],
     "row_no": ["row_no", "행번호", "행번", "행번호2"],
-    "part_number": ["part_number", "Part Number", "판매부번", "품번"],
+    "part_number": ["part_number", "Part Number", "판매부번", "품번", "규격1"],
     "spec": ["spec", "규격", "규격2", "description", "Description"],
     "import_qty": ["import_qty", "quantity", "qty", "수량", "수량_1"],
     "remaining_qty": ["remaining_qty", "remaining", "잔량", "잔량 수량", "잔량수량", "남은 수량"],
     "qty_unit": ["qty_unit", "unit", "수량단위", "수량단위_1"],
 }
 EXPORT_COLUMN_ALIASES = {
-    "export_date": ["export_date", "수출일", "수출일자", "수출예정일", "Shipping Date", "Invoice Date"],
-    "order_no": ["order_no", "Order No", "Order No.", "오더번호", "주문번호"],
-    "seq_no": ["seq_no", "Seq No", "Seq No.", "Sys No", "Sys No.", "순번"],
+    "export_date": ["export_date", "수출일", "수출일자", "수출예정일", "신고일자", "Shipping Date", "Invoice Date"],
+    "order_no": ["order_no", "Order No", "Order No.", "오더번호", "주문번호", "수출신고번호"],
+    "seq_no": ["seq_no", "Seq No", "Seq No.", "Sys No", "Sys No.", "순번", "행번호"],
     "origin": ["origin", "원산지"],
-    "part_number": ["part_number", "Part Number", "판매부번", "품번"],
+    "part_number": ["part_number", "Part Number", "판매부번", "품번", "규격1"],
     "hs_code": ["hs_code", "HS Code", "세번", "세번코드", "HS코드", "세번부호"],
     "required_qty": [
         "required_qty",
@@ -78,8 +78,9 @@ EXPORT_COLUMN_ALIASES = {
         "Ready to Ship Qty ",
         "Qty",
         "Quantity",
+        "수량_1",
     ],
-    "description": ["description", "Description", "품명", "규격", "설명"],
+    "description": ["description", "Description", "품명", "규격", "규격2", "설명"],
     "unit_price": ["unit_price", "단가", "U/Price", "Unit Price"],
     "amount": ["amount", "Amount", "금액", "합계금액"],
 }
@@ -375,7 +376,12 @@ def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
     return PreviewResult(batch=batch, warnings=[], column_mapping=column_mapping)
 
 
-def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> PreviewResult:
+def preview_exports(
+    db: Session,
+    rows: list[dict[str, Any]],
+    filename: str,
+    additional_origins: dict[str, set[str]] | None = None,
+) -> PreviewResult:
     rows, column_mapping = normalize_export_columns(rows)
     batch = UploadBatch(
         upload_type="exports",
@@ -391,7 +397,11 @@ def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
         try:
             payload = normalize_export_row(row)
             if not payload["origin"]:
-                payload["origin"] = _infer_origin_for_export(db, payload["part_number"])
+                payload["origin"] = _infer_origin_for_export(
+                    db,
+                    payload["part_number"],
+                    (additional_origins or {}).get(payload["part_number"]),
+                )
             status, message = "new", "Ready to insert."
         except ValueError as exc:
             payload = {key: clean_text(value) for key, value in row.items()}
@@ -414,7 +424,7 @@ def preview_exports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
     return PreviewResult(batch=batch, warnings=[], column_mapping=column_mapping)
 
 
-def _infer_origin_for_export(db: Session, part_number: str) -> str:
+def _infer_origin_for_export(db: Session, part_number: str, additional_origins: set[str] | None = None) -> str:
     origins = set(
         db.scalars(
             select(ImportLot.origin)
@@ -425,6 +435,7 @@ def _infer_origin_for_export(db: Session, part_number: str) -> str:
             )
         ).all()
     )
+    origins.update(additional_origins or set())
     if len(origins) == 1:
         return origins.pop()
     if not origins:
@@ -602,5 +613,3 @@ def _refresh_export_status_from_active_allocations(db: Session, export: ExportRe
         export.status = "partial_matched"
     else:
         export.status = "pending"
-
-

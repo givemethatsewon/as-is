@@ -426,6 +426,25 @@ h2 {
   padding: 24px;
 }
 
+.direct-match-actions {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 18px 24px;
+}
+
+.direct-match-actions .button {
+  min-width: 300px;
+}
+
+.direct-match-actions p {
+  margin: 0;
+}
+
 input,
 select {
   background: #fff;
@@ -870,6 +889,16 @@ tbody tr:hover {
 
   .panel {
     padding: 22px;
+  }
+
+  .direct-match-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .direct-match-actions .button {
+    min-width: 0;
+    width: 100%;
   }
 
   .workbench-action {

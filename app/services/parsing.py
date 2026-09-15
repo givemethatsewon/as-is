@@ -35,7 +35,11 @@ HEADER_HINTS = {
     ),
     "exports": (
         "order no",
+        "수출신고번호",
+        "신고일자",
         "part number",
+        "규격1",
+        "규격2",
         "description",
         "u/price",
         "ready to ship qty",
@@ -49,7 +53,15 @@ HEADER_HINTS = {
         "사용수량",
     ),
 }
-EXPORT_DATE_HEADERS = {"export_date", "수출일", "수출일자", "수출예정일", "shipping date", "invoice date"}
+EXPORT_DATE_HEADERS = {
+    "export_date",
+    "수출일",
+    "수출일자",
+    "수출예정일",
+    "신고일자",
+    "shipping date",
+    "invoice date",
+}
 SUBHEADER_HINTS = {"qty", "amount", "수량", "금액"}
 
 
@@ -244,4 +256,3 @@ def parse_decimal(value: Any, field: str) -> Decimal | None:
         return Decimal(text)
     except InvalidOperation as exc:
         raise ValueError(f"{field} must be numeric.") from exc
-

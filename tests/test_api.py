@@ -360,9 +360,64 @@ def test_upload_page_explains_video_style_excel_files(client):
     assert "수출 엑셀" in response.text
     assert "원상태진행" in response.text
     assert "수출 또는 수출 양식" in response.text
+    assert 'action="/upload/match"' in response.text
+    assert "두 파일로 바로 매칭 실행" in response.text
     assert "전체" not in response.text
     assert "신규" not in response.text
     assert "충돌" not in response.text
+
+
+def test_upload_page_can_upload_two_files_and_run_matching_immediately(client):
+    import_csv = (
+        "import_declaration_no,import_accepted_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,20,PC\n"
+    )
+    export_csv = (
+        "export_date,part_number,required_qty,description,unit_price\n"
+        "2025-08-16,MTG011114,8,STEERING RACK,3\n"
+    )
+
+    response = client.post(
+        "/upload/match",
+        files={
+            "import_file": ("imports.csv", import_csv, "text/csv"),
+            "export_file": ("exports.csv", export_csv, "text/csv"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert "업로드 및 매칭 완료" in response.text
+    assert "MTG011114" in response.text
+    assert "matched" in response.text
+    inventory = client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"})
+    assert inventory.json()["remaining_qty"] == 12
+
+
+def test_direct_matching_accepts_korean_declaration_workbooks_columns(client):
+    import_workbook = Workbook()
+    import_sheet = import_workbook.active
+    import_sheet.append(["수입신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1"])
+    import_sheet.append(["4397824100094M", "20240119", "IN", "8708309000", "001", "01", "IN58330A0000", "WHEEL CYLINDER", 148, "EA"])
+
+    export_workbook = Workbook()
+    export_sheet = export_workbook.active
+    export_sheet.append(["수출신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1"])
+    export_sheet.append(["4397824100011X", "20240319", "IN", "8708309000", "001", "01", "IN58330A0000", "WHEEL CYLINDER", 10, "EA"])
+
+    response = client.post(
+        "/upload/match",
+        files={
+            "import_file": ("수입 문서.xlsx", _workbook_bytes(import_workbook), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            "export_file": ("수출 문서.xlsx", _workbook_bytes(export_workbook), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert "업로드 및 매칭 완료" in response.text
+    assert "4397824100011X" in response.text
+    assert "IN58330A0000" in response.text
+    inventory = client.get("/api/inventory", params={"part_number": "IN58330A0000", "origin": "IN"})
+    assert inventory.json()["remaining_qty"] == 138
 
 
 def test_upload_review_detail_delete_and_invalidate_workflow(client):

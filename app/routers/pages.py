@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 from urllib.parse import urlencode
 
@@ -42,6 +43,61 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 @router.get("/upload")
 def upload_page(request: Request, message: str | None = None):
     return templates.TemplateResponse(request, "upload.html", {"active": "upload", "message": message})
+
+
+@router.post("/upload/match")
+async def upload_and_match_page(
+    request: Request,
+    import_file: UploadFile = File(...),
+    export_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    batches: list[UploadBatch] = []
+    try:
+        import_rows = await read_upload_rows(import_file, upload_type="imports")
+        export_rows = await read_upload_rows(export_file, upload_type="exports")
+
+        import_result = preview_imports(db, import_rows, import_file.filename or "수입 파일")
+        batches.append(import_result.batch)
+        _raise_for_preview_errors("수입 파일", import_result.batch)
+
+        export_result = preview_exports(
+            db,
+            export_rows,
+            export_file.filename or "수출 파일",
+            additional_origins=_preview_origins(import_result.batch),
+        )
+        batches.append(export_result.batch)
+        _raise_for_preview_errors("수출 파일", export_result.batch)
+
+        import_confirmed = confirm_batch(db, import_result.batch.id)
+        export_confirmed = confirm_batch(db, export_result.batch.id)
+        summary = run_matching(db)
+    except (ParseError, ValueError) as exc:
+        _discard_direct_upload_batches(db, batches)
+        return templates.TemplateResponse(
+            request,
+            "upload.html",
+            {"active": "upload", "error": str(exc)},
+            status_code=400,
+        )
+
+    exports = db.scalars(
+        select(ExportRequirement)
+        .outerjoin(UploadBatch, ExportRequirement.upload_batch_id == UploadBatch.id)
+        .where((ExportRequirement.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        .order_by(ExportRequirement.export_date.desc())
+    ).all()
+    message = (
+        f"업로드 및 매칭 완료: 수입 {import_confirmed['inserted_count']}건, "
+        f"수출 {export_confirmed['inserted_count']}건, 매칭 {summary.matched_count}건, "
+        f"일부 매칭 {summary.partial_matched_count}건, 재고 부족 {summary.insufficient_stock_count}건"
+    )
+    return templates.TemplateResponse(
+        request,
+        "exports.html",
+        {"active": "exports", "exports": exports, "message": message},
+    )
 
 
 @router.post("/upload/imports/preview")
@@ -224,3 +280,33 @@ def _preview_template(request: Request, batch: UploadBatch):
 
 def _upload_redirect(message: str) -> RedirectResponse:
     return RedirectResponse(url=f"/upload?{urlencode({'message': message})}", status_code=303)
+
+
+def _preview_origins(batch: UploadBatch) -> dict[str, set[str]]:
+    origins: dict[str, set[str]] = {}
+    for row in batch.rows:
+        if row.row_status not in {"new", "reactivate"}:
+            continue
+        payload = json.loads(row.payload_json)
+        part_number = payload.get("part_number")
+        origin = payload.get("origin")
+        if part_number and origin:
+            origins.setdefault(part_number, set()).add(origin)
+    return origins
+
+
+def _raise_for_preview_errors(label: str, batch: UploadBatch) -> None:
+    if batch.error_count == 0:
+        return
+    messages = list(dict.fromkeys(row.message for row in batch.rows if row.row_status == "error"))
+    detail = "; ".join(messages[:3])
+    raise ValueError(f"{label}에 오류 {batch.error_count}건이 있습니다. {detail}")
+
+
+def _discard_direct_upload_batches(db: Session, batches: list[UploadBatch]) -> None:
+    for batch in reversed(batches):
+        db.refresh(batch)
+        if batch.confirmed_at is None:
+            delete_unconfirmed_upload(db, batch.id)
+        elif batch.invalidated_at is None:
+            invalidate_confirmed_upload(db, batch.id, "바로 매칭 실행 중 오류로 자동 취소")
