@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}처리 이력 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head"><div><p class="eyebrow">Audit trail</p><h1>처리 이력</h1><p class="supporting-copy">업로드 원본, 확정 결과와 파일 단위 되돌리기 상태를 확인합니다.</p></div></section>
+{% if message %}<div class="notice success">{{ message }}</div>{% endif %}
+<section class="table-section"><div class="table-wrap"><table>
+  <thead><tr><th>처리 시각</th><th>파일</th><th>구분</th><th>상태</th><th>행</th><th>작업</th></tr></thead>
+  <tbody>{% for batch in batches %}<tr><td>{{ batch.created_at.strftime('%Y-%m-%d %H:%M') }}</td><td><strong>{{ batch.filename }}</strong>{% if batch.reverted_at %}<small class="cell-sub">되돌림 {{ batch.reverted_at.strftime('%Y-%m-%d %H:%M') }}</small>{% endif %}</td><td>{{ batch.upload_type|upload_type_label }}</td><td><span class="status {{ batch.status }}">{{ batch.status|display_status }}</span></td><td>{{ batch.total_rows }}</td><td><div class="row-actions"><a class="button small" href="/batches/{{ batch.id }}">상세</a>{% if batch.source_path %}<a class="button small" href="/api/upload-batches/{{ batch.id }}/original">원본</a>{% endif %}{% if batch.upload_type == 'exports' and batch.confirmed_at %}<a class="button small primary" href="/api/match-runs/{{ batch.id }}/result.xlsx">결과</a>{% endif %}{% if batch.upload_type == 'exports' and batch.confirmed_at and not batch.reverted_at %}<form method="post" action="/batches/{{ batch.id }}/revert" onsubmit="return confirm('이 수출 파일의 모든 재고 차감을 되돌릴까요?')"><input type="hidden" name="csrf_token" value="{{ request.session.get('csrf_token', '') }}"><button class="button small danger" type="submit">파일 전체 되돌리기</button></form>{% endif %}</div></td></tr>{% else %}<tr><td colspan="6" class="empty">처리 이력이 없습니다.</td></tr>{% endfor %}</tbody>
+</table></div></section>
+{% if total_pages > 1 %}<nav class="pagination"><span>{{ page }} / {{ total_pages }}</span></nav>{% endif %}
+{% endblock %}

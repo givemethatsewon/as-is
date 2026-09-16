@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ batch.filename }} 검토 · As-Is{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">{{ batch.upload_type|upload_type_label }} · {{ batch.status|display_status }}</p><h1>{% if batch.upload_type == 'exports' %}수출 배정 검토{% else %}수입 재고 검토{% endif %}</h1><p class="supporting-copy file-title">{{ batch.filename }}</p></div>
+  <div class="actions">
+    {% if batch.source_path %}<a class="button" href="/api/upload-batches/{{ batch.id }}/original">원본 다운로드</a>{% endif %}
+    {% if batch.confirmed_at and batch.upload_type == 'exports' %}<a class="button primary" href="/api/match-runs/{{ batch.id }}/result.xlsx">결과 엑셀 다운로드</a>{% endif %}
+    {% if batch.status == 'review_ready' and not batch.confirmed_at %}
+    <form method="post" action="/batches/{{ batch.id }}/confirm"><input type="hidden" name="csrf_token" value="{{ request.session.get('csrf_token', '') }}"><button class="button primary" type="submit" {% if batch.error_count or batch.conflict_count %}disabled{% endif %}>{% if batch.upload_type == 'exports' %}확정하고 재고 차감{% else %}수입 재고 반영{% endif %}</button></form>
+    {% endif %}
+  </div>
+</section>
+{% if message %}<div class="notice {% if '변경' in message or '오류' in message %}danger{% else %}success{% endif %}">{{ message }}</div>{% endif %}
+
+{% if batch.status in ['queued', 'processing'] %}
+<section class="processing-panel" data-batch-poll="{{ batch.id }}"><div class="spinner" aria-hidden="true"></div><div><h2>파일을 읽고 있습니다</h2><p><span data-progress-count>{{ batch.processed_rows }}</span>개 행 처리 · 완료되면 검토 화면으로 자동 전환됩니다.</p></div></section>
+{% elif batch.status == 'failed' %}
+<div class="notice danger"><strong>처리 실패</strong><br>{{ batch.error_message }}</div>
+{% else %}
+<section class="simple-status review-summary" aria-label="파일 검토 요약"><p>전체 <strong>{{ batch.total_rows }}</strong></p><p>신규 <strong>{{ batch.new_count }}</strong></p><p>중복 <strong>{{ batch.duplicate_count }}</strong></p><p>충돌 <strong>{{ batch.conflict_count }}</strong></p><p>오류 <strong>{{ batch.error_count }}</strong></p></section>
+{% if batch.conflict_count or batch.error_count %}<div class="notice danger">충돌 또는 오류가 있어 파일 전체를 확정할 수 없습니다. 원본을 수정해 다시 올려주세요.</div>{% endif %}
+
+{% if batch.upload_type == 'exports' %}
+<section class="allocation-review" aria-label="수출 행별 배정 결과">
+  {% for item in review_rows %}
+  {% set shortage = item.plans|sum(attribute='plan.shortage_qty') %}
+  <details class="review-row allocation-group" {% if shortage %}open{% endif %}>
+    <summary><span class="row-index">{{ item.row.row_number }}</span><span class="row-main"><strong>{{ item.payload.order_no or '-' }} · {{ item.payload.part_number }}</strong><small>Seq {{ item.payload.seq_no or '-' }} · {{ item.payload.origin }} · 요청 {{ item.payload.required_qty }}</small></span>{% if shortage %}<span class="status insufficient_stock">NO MATCH · 부족 {{ shortage }}</span>{% else %}<span class="status matched">전량 배정</span>{% endif %}<span class="expand-label">배정 근거 보기</span></summary>
+    <div class="allocation-lines">
+      <div class="allocation-line allocation-head"><span>순서</span><span>수입신고번호</span><span>수리일</span><span>원산지</span><span>HS</span><span>배정</span><span>배정 후 잔량</span></div>
+      {% for entry in item.plans %}
+      <div class="allocation-line {% if entry.plan.shortage_qty %}shortage-line{% endif %}"><span>{{ entry.plan.sequence }}</span><span><strong>{{ entry.lot.import_declaration_no if entry.lot else 'NO MATCH' }}</strong></span><span>{{ entry.lot.import_accepted_date if entry.lot else '-' }}</span><span>{{ entry.lot.origin if entry.lot else '-' }}</span><span>{{ entry.plan.hs_code or '-' }}</span><span>{{ entry.plan.matched_qty or ('부족 ' ~ entry.plan.shortage_qty) }}</span><span>{{ entry.plan.remaining_qty_after if entry.plan.remaining_qty_after is not none else '-' }}</span></div>
+      {% endfor %}
+    </div>
+  </details>
+  {% else %}<div class="empty panel">검토할 수출 행이 없습니다.</div>{% endfor %}
+</section>
+{% else %}
+<section class="table-section"><div class="section-head"><div><p class="eyebrow">행별 판정</p><h2>수입 로트</h2></div></div><div class="table-wrap"><table>
+  <thead><tr><th>행</th><th>상태</th><th>수입신고번호</th><th>품번</th><th>원산지</th><th>수리일</th><th>수량</th><th>안내</th></tr></thead>
+  <tbody>{% for item in review_rows %}<tr class="review-row"><td>{{ item.row.row_number }}</td><td><span class="status {{ item.row.row_status }}">{{ item.row.row_status|display_status }}</span></td><td>{{ item.payload.import_declaration_no or '-' }}</td><td>{{ item.payload.part_number or '-' }}</td><td>{{ item.payload.origin or '-' }}</td><td>{{ item.payload.import_accepted_date or '-' }}</td><td>{{ item.payload.import_qty or '-' }}</td><td class="payload">{{ item.row.message }}</td></tr>{% else %}<tr><td colspan="8" class="empty">검토할 행이 없습니다.</td></tr>{% endfor %}</tbody>
+</table></div></section>
+{% endif %}
+{% if total_pages > 1 %}<nav class="pagination" aria-label="페이지 이동">{% if page > 1 %}<a class="button small" href="?page={{ page - 1 }}">이전</a>{% endif %}<span>{{ page }} / {{ total_pages }}</span>{% if page < total_pages %}<a class="button small" href="?page={{ page + 1 }}">다음</a>{% endif %}</nav>{% endif %}
+{% endif %}
+{% endblock %}

@@ -66,14 +66,11 @@ def test_hs_code_warning_rows_for_dashboard(db_session):
     ]
 
 
-def test_dashboard_page_shows_simple_excel_matching_entry(client):
+def test_dashboard_page_shows_separate_import_and_export_workflows(client):
     response = client.get("/dashboard")
 
     assert response.status_code == 200
-    assert "Stock 차감" in response.text
-    assert "엑셀 파일 넣기" in response.text
-    assert "매칭 실행" in response.text
-    assert "결과 다운로드" in response.text
-    assert "현재 Stock 잔량" not in response.text
-    assert "만료 임박 재고" not in response.text
-    assert "HS 코드 확인 필요" not in response.text
+    assert "운영 워크벤치" in response.text
+    assert "수입 재고 추가" in response.text
+    assert "수출 매칭 시작" in response.text
+    assert "확정 전에는 재고가 차감되지 않습니다" in response.text

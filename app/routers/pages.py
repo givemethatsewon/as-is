@@ -20,16 +20,18 @@ from app.auth import (
     verify_password,
 )
 from app.db import get_db
-from app.models import ExportRequirement, UploadBatch
+from app.models import ExportRequirement, ImportLot, UploadBatch, UploadPreviewRow
 from app.services.matching import run_matching, undo_export_matching
 from app.services.parsing import ParseError, read_upload_rows
 from app.services.summaries import dashboard_insights, dashboard_summary, inventory_summary
 from app.services.uploads import (
+    confirm_match_run,
     confirm_batch,
     delete_unconfirmed_upload,
     invalidate_confirmed_upload,
     preview_exports,
     preview_imports,
+    revert_match_run,
 )
 from app.services.settings import get_eligibility_days, set_eligibility_days
 from app.templating import templates
@@ -119,16 +121,110 @@ def update_settings_page(request: Request, eligibility_days: int = Form(...), db
 
 
 @router.get("/")
-def home():
-    return RedirectResponse(url="/dashboard", status_code=303)
+def home(request: Request, db: Session = Depends(get_db)):
+    recent_batches = list(db.scalars(select(UploadBatch).order_by(UploadBatch.created_at.desc()).limit(8)))
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            "active": "workbench",
+            "summary": dashboard_summary(db),
+            "recent_batches": recent_batches,
+        },
+    )
 
 
 @router.get("/dashboard")
 def dashboard(request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse(url="/", status_code=303)
+
+
+@router.get("/batches/{batch_id}")
+def batch_review_page(
+    request: Request,
+    batch_id: str,
+    page: int = 1,
+    message: str | None = None,
+    db: Session = Depends(get_db),
+):
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="업로드 파일을 찾을 수 없습니다.")
+    page = max(1, page)
+    page_size = 50
+    rows = list(
+        db.scalars(
+            select(UploadPreviewRow)
+            .where(UploadPreviewRow.batch_id == batch.id)
+            .order_by(UploadPreviewRow.row_number)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    )
+    review_rows = []
+    for row in rows:
+        plans = []
+        for plan in sorted(row.planned_allocations, key=lambda item: item.sequence):
+            plans.append({"plan": plan, "lot": db.get(ImportLot, plan.import_lot_id) if plan.import_lot_id else None})
+        review_rows.append({"row": row, "payload": json.loads(row.payload_json), "plans": plans})
+    total_pages = max(1, (batch.total_rows + page_size - 1) // page_size)
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
-        {"summary": dashboard_summary(db), "insights": dashboard_insights(db), "active": "dashboard"},
+        "batch_review.html",
+        {
+            "active": "workbench",
+            "batch": batch,
+            "review_rows": review_rows,
+            "page": page,
+            "total_pages": total_pages,
+            "message": message,
+        },
+    )
+
+
+@router.post("/batches/{batch_id}/confirm")
+def confirm_batch_page(batch_id: str, db: Session = Depends(get_db)):
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="업로드 파일을 찾을 수 없습니다.")
+    try:
+        result = confirm_batch(db, batch_id) if batch.upload_type == "imports" else confirm_match_run(db, batch_id)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/batches/{batch_id}?{urlencode({'message': str(exc)})}",
+            status_code=303,
+        )
+    message = "수입 재고를 반영했습니다." if batch.upload_type == "imports" else "수출 매칭을 확정하고 재고를 차감했습니다."
+    return RedirectResponse(url=f"/batches/{batch_id}?{urlencode({'message': message})}", status_code=303)
+
+
+@router.post("/batches/{batch_id}/revert")
+def revert_batch_page(batch_id: str, db: Session = Depends(get_db)):
+    try:
+        result = revert_match_run(db, batch_id)
+        message = f"파일 전체를 되돌려 재고 {result['restored_qty']}개를 복구했습니다."
+    except ValueError as exc:
+        message = str(exc)
+    return RedirectResponse(url=f"/history?{urlencode({'message': message})}", status_code=303)
+
+
+@router.get("/history")
+def history_page(request: Request, page: int = 1, message: str | None = None, db: Session = Depends(get_db)):
+    page = max(1, page)
+    page_size = 50
+    all_batches = list(db.scalars(select(UploadBatch).order_by(UploadBatch.created_at.desc())))
+    total_pages = max(1, (len(all_batches) + page_size - 1) // page_size)
+    batches = all_batches[(page - 1) * page_size : page * page_size]
+    return templates.TemplateResponse(
+        request,
+        "history.html",
+        {
+            "active": "history",
+            "batches": batches,
+            "page": page,
+            "total_pages": total_pages,
+            "message": message,
+        },
     )
 
 

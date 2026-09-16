@@ -1,36 +1,63 @@
 {% extends "base.html" %}
-{% block title %}대시보드 · As-Is{% endblock %}
+{% block title %}운영 워크벤치 · As-Is{% endblock %}
 {% block content %}
-<section class="page-head">
+<section class="page-head workbench-head">
   <div>
-    <p class="eyebrow">엑셀 매칭</p>
-    <h1>Stock 차감</h1>
-    <p class="supporting-copy">수입/수출 엑셀을 넣고 차감 결과를 받습니다.</p>
+    <p class="eyebrow">오늘의 원상태 수출 업무</p>
+    <h1>운영 워크벤치</h1>
+    <p class="supporting-copy">수입 재고를 먼저 누적한 뒤 수출 파일을 올려 FIFO 배정 결과를 검토하세요.</p>
   </div>
+  <div class="workbench-meta"><span>매칭 기준</span><strong>품번 + 원산지 · 720일 · FIFO</strong></div>
 </section>
 
-<section class="simple-workbench" aria-label="주요 작업">
-  <a class="workbench-action primary" href="/upload">
-    <span class="step-number">1</span>
-    <span>
-      <strong>엑셀 파일 넣기</strong>
-      <small>수입 Stock 파일과 수출 파일을 업로드합니다.</small>
-    </span>
-  </a>
-  <a class="workbench-action" href="/exports">
-    <span class="step-number">2</span>
-    <span>
-      <strong>매칭 실행</strong>
-      <small>Part Number, 원산지, FIFO 기준으로 차감합니다.</small>
-    </span>
-  </a>
-  <a class="workbench-action" href="/reports">
-    <span class="step-number">3</span>
-    <span>
-      <strong>결과 다운로드</strong>
-      <small>차감 결과와 NO MATCH 내역을 엑셀로 받습니다.</small>
-    </span>
-  </a>
+<section class="upload-grid" aria-label="주요 작업">
+  <article class="upload-card import-card">
+    <div class="upload-card-head"><span class="action-index">01</span><div><p class="eyebrow">Inventory intake</p><h2>수입 재고 추가</h2></div></div>
+    <p>새 수입 로트를 기존 재고에 누적합니다. 동일 건은 건너뛰고, 값이 다른 충돌은 파일 전체를 막습니다.</p>
+    <form class="upload-form" data-upload-form data-upload-type="imports">
+      <label class="file-drop">
+        <span class="file-drop-title">수입 Stock 엑셀 선택</span>
+        <span class="file-drop-help">.xlsx · .xlsm · .csv / VBA는 실행하지 않음</span>
+        <input class="file-picker-input" type="file" name="file" accept=".xlsx,.xlsm,.csv" required>
+        <span class="file-picker-name">선택된 파일 없음</span>
+      </label>
+      <button class="button primary wide" type="submit">수입 파일 검토 시작</button>
+      <p class="upload-feedback" role="status" aria-live="polite"></p>
+    </form>
+  </article>
+
+  <article class="upload-card export-card">
+    <div class="upload-card-head"><span class="action-index">02</span><div><p class="eyebrow">Export matching</p><h2>수출 매칭 시작</h2></div></div>
+    <p>수출 행별로 품번·원산지와 720일 기준을 확인하고, 오래된 수입 로트부터 배정합니다.</p>
+    <form class="upload-form" data-upload-form data-upload-type="exports">
+      <label class="file-drop">
+        <span class="file-drop-title">수출 엑셀 선택</span>
+        <span class="file-drop-help">확정 전에는 재고가 차감되지 않습니다.</span>
+        <input class="file-picker-input" type="file" name="file" accept=".xlsx,.xlsm,.csv" required>
+        <span class="file-picker-name">선택된 파일 없음</span>
+      </label>
+      <button class="button primary wide" type="submit">수출 배정 미리보기</button>
+      <p class="upload-feedback" role="status" aria-live="polite"></p>
+    </form>
+  </article>
 </section>
 
+<section class="metric-grid workbench-metrics" aria-label="재고 현황">
+  <article class="metric"><span>사용 가능 수량</span><strong>{{ summary.available_qty }}</strong></article>
+  <article class="metric"><span>총 잔량</span><strong>{{ summary.remaining_qty }}</strong></article>
+  <article class="metric caution"><span>만료 예정 로트</span><strong>{{ summary.expiring_soon_lots_count }}</strong></article>
+  <article class="metric warn"><span>기한 초과 수량</span><strong>{{ summary.expired_qty }}</strong></article>
+</section>
+
+<section class="table-section recent-files">
+  <div class="section-head"><div><p class="eyebrow">최근 처리</p><h2>파일 작업 현황</h2></div><a class="text-link" href="/history">전체 이력 보기 →</a></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>파일</th><th>구분</th><th>상태</th><th>행</th><th>신규 / 중복 / 충돌</th><th>작업</th></tr></thead>
+    <tbody>
+    {% for batch in recent_batches %}
+      <tr><td><strong>{{ batch.filename }}</strong><small class="cell-sub">{{ batch.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td><td>{{ batch.upload_type|upload_type_label }}</td><td><span class="status {{ batch.status }}">{{ batch.status|display_status }}</span></td><td>{{ batch.processed_rows }} / {{ batch.total_rows or '-' }}</td><td>{{ batch.new_count }} / {{ batch.duplicate_count }} / {{ batch.conflict_count }}</td><td><a class="button small" href="/batches/{{ batch.id }}">열기</a></td></tr>
+    {% else %}<tr><td colspan="6" class="empty">아직 처리한 파일이 없습니다.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
 {% endblock %}
