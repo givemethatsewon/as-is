@@ -16,6 +16,9 @@ def test_workbench_has_two_separate_primary_excel_actions(client) -> None:
     assert 'data-upload-type="imports"' in response.text
     assert 'data-upload-type="exports"' in response.text
     assert "직접 입력" not in response.text
+    assert "Part Number · FIFO" in response.text
+    assert "720일" not in response.text
+    assert "품번 + 원산지" not in response.text
 
 
 def test_export_review_groups_rows_with_expandable_allocations_and_shortage(client, db_session) -> None:
@@ -41,7 +44,6 @@ def test_export_review_groups_rows_with_expandable_allocations_and_shortage(clie
             }
         ],
         "exports.xlsx",
-        eligibility_days=720,
     )
 
     response = client.get(f"/batches/{run.batch.id}")
@@ -51,9 +53,15 @@ def test_export_review_groups_rows_with_expandable_allocations_and_shortage(clie
     assert "ORDER-1" in response.text
     assert "IMP-A" in response.text
     assert "NO MATCH" in response.text
-    assert "부족 2" in response.text
+    assert "미배정 수량 2" in response.text
     assert "확정하고 재고 차감" in response.text
     assert "<details" in response.text
+    assert "수입신고번호" in response.text
+    assert "신고일자" in response.text
+    assert "세번" in response.text
+    assert "차감 전 수량" in response.text
+    assert "차감 수량" in response.text
+    assert "차감 후 잔량" in response.text
 
 
 def test_batch_review_uses_50_row_pagination(client, db_session) -> None:
@@ -99,7 +107,6 @@ def test_history_shows_result_download_and_file_level_revert(client, db_session)
         db_session,
         [{"export_date": "2026-02-01", "origin": "CN", "part_number": "PN-1", "required_qty": "2"}],
         "exports.xlsx",
-        eligibility_days=720,
     )
     confirm_match_run(db_session, run.batch.id)
 
@@ -118,4 +125,3 @@ def test_frontend_contains_progress_polling_and_csrf_header() -> None:
     assert "/api/upload-batches/" in script
     assert "X-CSRF-Token" in script
     assert "setInterval" in script
-

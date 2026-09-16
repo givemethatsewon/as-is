@@ -7,7 +7,7 @@
     <h1>운영 워크벤치</h1>
     <p class="supporting-copy">수입 재고를 먼저 누적한 뒤 수출 파일을 올려 FIFO 배정 결과를 검토하세요.</p>
   </div>
-  <div class="workbench-meta"><span>매칭 기준</span><strong>품번 + 원산지 · 720일 · FIFO</strong></div>
+  <div class="workbench-meta"><span>Matching key</span><strong>Part Number · FIFO</strong></div>
 </section>
 
 <section class="upload-grid" aria-label="주요 작업">
@@ -28,7 +28,7 @@
 
   <article class="upload-card export-card">
     <div class="upload-card-head"><span class="action-index">02</span><div><p class="eyebrow">Export matching</p><h2>수출 매칭 시작</h2></div></div>
-    <p>수출 행별로 품번·원산지와 720일 기준을 확인하고, 오래된 수입 로트부터 배정합니다.</p>
+    <p>`규격1`의 Part Number가 같은 수입 lot을 `신고일자` FIFO로 배정합니다.</p>
     <form class="upload-form" data-upload-form data-upload-type="exports">
       <label class="file-drop">
         <span class="file-drop-title">수출 엑셀 선택</span>
@@ -43,10 +43,10 @@
 </section>
 
 <section class="metric-grid workbench-metrics" aria-label="재고 현황">
-  <article class="metric"><span>사용 가능 수량</span><strong>{{ summary.available_qty }}</strong></article>
-  <article class="metric"><span>총 잔량</span><strong>{{ summary.remaining_qty }}</strong></article>
-  <article class="metric caution"><span>만료 예정 로트</span><strong>{{ summary.expiring_soon_lots_count }}</strong></article>
-  <article class="metric warn"><span>기한 초과 수량</span><strong>{{ summary.expired_qty }}</strong></article>
+  <article class="metric"><span>수량_1</span><strong>{{ summary.total_import_qty }}</strong></article>
+  <article class="metric"><span>차감 수량</span><strong>{{ summary.total_matched_qty }}</strong></article>
+  <article class="metric"><span>차감 후 잔량</span><strong>{{ summary.total_remaining_qty }}</strong></article>
+  <article class="metric"><span>소진 lot</span><strong>{{ summary.used_up_lots_count }}</strong></article>
 </section>
 
 <section class="table-section recent-files">

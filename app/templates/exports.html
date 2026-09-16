@@ -9,6 +9,7 @@
   </div>
   <form class="inline-form" action="/exports/matching/run" method="post">
     <button class="button primary" type="submit">매칭 실행</button>
+    {% if result_batch_id %}<a class="button primary" href="/api/match-runs/{{ result_batch_id }}/result.xlsx">결과 엑셀 다운로드</a>{% endif %}
   </form>
 </section>
 
@@ -20,19 +21,23 @@
     <table class="export-list-table">
       <thead>
         <tr>
-          <th>수출일</th><th>Order No</th><th>Seq</th><th>품번</th><th>원산지</th><th>필요 수량</th><th>상태</th><th>작업</th>
+          <th>수출신고번호</th><th>신고일자</th><th>원산지</th><th>세번</th><th>란번호2</th><th>행번호</th><th>규격1</th><th>규격2</th><th>수량_1</th><th>수량단위_1</th><th>Status</th><th>작업</th>
         </tr>
       </thead>
       <tbody>
         {% for export in exports %}
         <tr>
-          <td data-label="수출일">{{ export.export_date }}</td>
-          <td data-label="Order No">{{ export.order_no or '-' }}</td>
-          <td data-label="Seq">{{ export.seq_no or '-' }}</td>
-          <td data-label="품번">{{ export.part_number }}</td>
+          <td data-label="수출신고번호">{{ export.order_no or '-' }}</td>
+          <td data-label="신고일자">{{ export.export_date }}</td>
           <td data-label="원산지">{{ export.origin }}</td>
-          <td data-label="필요 수량">{{ export.required_qty }}</td>
-          <td data-label="상태"><span class="status {{ export.status }}">{{ export.status|display_status }}</span></td>
+          <td data-label="세번">{{ export.hs_code or '-' }}</td>
+          <td data-label="란번호2">{{ export.line_no or '-' }}</td>
+          <td data-label="행번호">{{ export.seq_no or '-' }}</td>
+          <td data-label="규격1">{{ export.part_number }}</td>
+          <td data-label="규격2">{{ export.description or '-' }}</td>
+          <td data-label="수량_1">{{ export.required_qty }}</td>
+          <td data-label="수량단위_1">{{ export.qty_unit or '-' }}</td>
+          <td data-label="Status"><span class="status {{ export.status }}">{{ export.status|display_status }}</span></td>
           <td data-label="작업">
             {% if export.status in ['matched', 'partial_matched'] %}
             <form action="/exports/matching/undo" method="post">
@@ -45,7 +50,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="empty">수출 요청이 없습니다.</td></tr>
+        <tr><td colspan="12" class="empty">수출 요청이 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>

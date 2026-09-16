@@ -11,8 +11,8 @@
 
 <form class="filterbar" method="get" action="/inventory">
   <label>
-    <span class="field-name">품번</span>
-    <input name="part_number" placeholder="품번 입력" value="{{ part_number }}">
+    <span class="field-name">규격1</span>
+    <input name="part_number" placeholder="규격1" value="{{ part_number }}">
   </label>
   <label>
     <span class="field-name">원산지</span>
@@ -20,7 +20,7 @@
   </label>
   <select name="status">
     <option value="">전체 상태</option>
-    {% for item in ["available", "expiring_soon", "expired", "used_up", "blocked"] %}
+    {% for item in ["available", "used_up"] %}
     <option value="{{ item }}" {% if status == item %}selected{% endif %}>{{ item|display_status }}</option>
     {% endfor %}
   </select>
@@ -28,47 +28,40 @@
 </form>
 
 <section class="metric-grid compact">
-  <article class="metric"><span>총 수입</span><strong>{{ summary.total_imported_qty }}</strong></article>
-  <article class="metric"><span>총 사용</span><strong>{{ summary.total_exported_qty }}</strong></article>
-  <article class="metric"><span>남은 수량</span><strong>{{ summary.remaining_qty }}</strong></article>
-  <article class="metric"><span>사용 가능</span><strong>{{ summary.available_qty }}</strong></article>
-  <article class="metric warn"><span>기한 초과</span><strong>{{ summary.expired_qty }}</strong></article>
+  <article class="metric"><span>수량_1</span><strong>{{ summary.total_imported_qty }}</strong></article>
+  <article class="metric"><span>차감 수량</span><strong>{{ summary.total_exported_qty }}</strong></article>
+  <article class="metric"><span>차감 후 잔량</span><strong>{{ summary.remaining_qty }}</strong></article>
 </section>
 
 <section class="table-section">
   <h2>재고 목록</h2>
-  <p class="table-caption">수입신고 건별 남은 수량을 확인합니다.</p>
-  <details class="term-details">
-    <summary>용어 보기</summary>
-    <div class="term-list" aria-label="용어 설명">
-      <span class="term"><strong>품번</strong> 부품 번호</span>
-      <span class="term"><strong>수리일</strong> 수입신고 수리일</span>
-      <span class="term"><strong>란/행</strong> 신고서 내 위치</span>
-    </div>
-  </details>
+  <p class="table-caption">수입 문서 source column과 누적 차감 수량을 확인합니다.</p>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>품번</th><th>원산지</th><th>HS 코드</th><th>수리일</th><th>수입신고번호</th><th>란/행</th><th>수입 수량</th><th>사용 수량</th><th>남은 수량</th><th>상태</th>
+          <th>수입신고번호</th><th>신고일자</th><th>원산지</th><th>세번</th><th>란번호2</th><th>행번호</th><th>규격1</th><th>규격2</th><th>수량_1</th><th>수량단위_1</th><th>차감 수량</th><th>차감 후 잔량</th><th>Status</th>
         </tr>
       </thead>
       <tbody>
         {% for lot in summary.lots %}
         <tr>
-          <td>{{ lot.part_number }}</td>
+          <td>{{ lot.import_declaration_no }}</td>
+          <td>{{ lot.import_accepted_date }}</td>
           <td>{{ lot.origin }}</td>
           <td>{{ lot.hs_code }}</td>
-          <td>{{ lot.import_accepted_date }}</td>
-          <td>{{ lot.import_declaration_no }}</td>
-          <td>{{ lot.line_no }}/{{ lot.row_no }}</td>
+          <td>{{ lot.line_no }}</td>
+          <td>{{ lot.row_no }}</td>
+          <td>{{ lot.part_number }}</td>
+          <td>{{ lot.spec or '-' }}</td>
           <td>{{ lot.import_qty }}</td>
+          <td>{{ lot.qty_unit or '-' }}</td>
           <td>{{ lot.used_qty }}</td>
           <td>{{ lot.remaining_qty }}</td>
           <td><span class="status {{ lot.status }}">{{ lot.status|display_status }}</span></td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="empty">조건에 맞는 재고가 없습니다.</td></tr>
+        <tr><td colspan="13" class="empty">조건에 맞는 재고가 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>

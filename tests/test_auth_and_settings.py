@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 from app.auth import hash_password, reset_login_attempts, verify_password
 from app.db import get_db
 from app.main import app
-from app.services.settings import get_eligibility_days, set_eligibility_days
 
 
 def test_pbkdf2_password_hash_verification() -> None:
@@ -69,11 +68,3 @@ def test_login_is_throttled_after_repeated_failures(db_session) -> None:
     app.dependency_overrides.clear()
 
     assert responses[-1].status_code == 429
-
-
-def test_matching_setting_defaults_to_720_and_is_snapshotted(db_session) -> None:
-    assert get_eligibility_days(db_session) == 720
-
-    set_eligibility_days(db_session, 365)
-
-    assert get_eligibility_days(db_session) == 365

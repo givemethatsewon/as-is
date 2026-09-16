@@ -135,6 +135,31 @@ def test_export_preview_supports_contest_sample_headers(db_session):
     assert result.column_mapping["hs_code"] == "세번"
 
 
+def test_export_preview_preserves_all_source_document_columns(db_session):
+    rows = [
+        {
+            "수출신고번호": "4397824100011X",
+            "신고일자": "20240319",
+            "원산지": "IN",
+            "세번": "8708309000",
+            "란번호2": "001",
+            "행번호": "01",
+            "규격1": "IN58330A0000",
+            "규격2": "W/CYLINDER ASS'Y",
+            "수량_1": 10,
+            "수량단위_1": "EA",
+        }
+    ]
+
+    result = preview_exports(db_session, rows, "수출 문서.xlsx")
+    payload = __import__("json").loads(result.batch.rows[0].payload_json)
+
+    assert result.column_mapping["line_no"] == "란번호2"
+    assert result.column_mapping["qty_unit"] == "수량단위_1"
+    assert payload["line_no"] == "001"
+    assert payload["qty_unit"] == "EA"
+
+
 def test_export_preview_missing_required_column_uses_korean_message(db_session):
     rows = [{"Part Number": "MTG011114", "Qty": "800", "원산지": "CN"}]
 

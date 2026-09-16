@@ -54,22 +54,17 @@ def test_upload_confirm_match_and_download_reports(client):
     assert xlsx_response.content.startswith(b"PK")
 
     workbook = load_workbook(BytesIO(xlsx_response.content))
-    assert workbook.sheetnames == ["수출 결과"]
+    assert workbook.sheetnames == ["수출 결과", "원상태잔량"]
     sheet = workbook["수출 결과"]
-    assert sheet["A1"].value == "Order No"
+    assert sheet["A1"].value == "수출 문서"
     assert sheet["A1"].font.bold
-    assert sheet["A1"].fill.fgColor.rgb == "000F5F50"
-    assert sheet.freeze_panes == "A2"
-    assert sheet.auto_filter.ref == sheet.dimensions
-    headers = [cell.value for cell in sheet[1]]
-    assert headers[:8] == ["Order No", "Seq No", "Part Number", "Description", "U/Price", "Ready to Ship Qty", "Amount", "원산지"]
-    assert "수입 란번호" in headers
-    assert "수입 행번호" in headers
-    assert "수입신고번호" in headers
-    assert "수리일" in headers
-    assert "매칭 수량" in headers
-    assert "매칭 후 잔량" in headers
-    assert sheet.cell(row=2, column=headers.index("수입신고번호") + 1).value == "A"
+    assert sheet["A1"].fill.fgColor.rgb == "00173F5F"
+    assert sheet.freeze_panes == "A3"
+    headers = [cell.value for cell in sheet[2]]
+    assert headers[:10] == ["수출신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1"]
+    assert headers[10:20] == ["수입신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1"]
+    assert headers[20:] == ["차감 전 수량", "차감 수량", "차감 후 잔량", "미배정 수량"]
+    assert sheet.cell(row=3, column=11).value == "A"
 
 
 def test_import_preview_reads_video_style_xlsm_stock_sheet(client, db_session):
@@ -218,12 +213,12 @@ def test_matching_report_includes_no_match_row_for_shortage(client):
     result_response = client.get("/api/reports/download.xlsx")
     workbook = load_workbook(BytesIO(result_response.content))
     sheet = workbook["수출 결과"]
-    headers = [cell.value for cell in sheet[1]]
-    assert "Order No" in headers
-    assert "Seq No" in headers
-    assert "부족 수량" in headers
-    assert sheet.cell(row=3, column=headers.index("수입신고번호") + 1).value == "NO MATCH"
-    assert sheet.cell(row=3, column=headers.index("부족 수량") + 1).value == 5
+    headers = [cell.value for cell in sheet[2]]
+    assert "수출신고번호" in headers
+    assert "행번호" in headers
+    assert "미배정 수량" in headers
+    assert sheet.cell(row=4, column=11).value == "NO MATCH"
+    assert sheet.cell(row=4, column=24).value == 5
 
 
 def test_api_can_undo_export_matching(client, db_session):
@@ -270,7 +265,7 @@ def test_exports_page_shows_per_item_undo_action_after_matching(client):
 
     assert response.status_code == 200
     assert "SOTB20056-250507002-01" in response.text
-    assert "Seq" in response.text
+    assert "행번호" in response.text
     assert "이 건 되돌리기" in response.text
     assert "되돌리기는 해당 수출 항목 하나만 원복합니다" not in response.text
 
@@ -356,10 +351,11 @@ def test_upload_page_explains_video_style_excel_files(client):
 
     assert response.status_code == 200
     assert "엑셀 파일 넣기" in response.text
-    assert "수입 Stock 엑셀" in response.text
-    assert "수출 엑셀" in response.text
-    assert "원상태진행" in response.text
-    assert "수출 또는 수출 양식" in response.text
+    assert "수입 문서" in response.text
+    assert "수출 문서" in response.text
+    assert "수입신고번호" in response.text
+    assert "수출신고번호" in response.text
+    assert "수량단위_1" in response.text
     assert 'action="/upload/match"' in response.text
     assert "두 파일로 바로 매칭 실행" in response.text
     assert "전체" not in response.text
@@ -389,6 +385,8 @@ def test_upload_page_can_upload_two_files_and_run_matching_immediately(client):
     assert "업로드 및 매칭 완료" in response.text
     assert "MTG011114" in response.text
     assert "matched" in response.text
+    assert "결과 엑셀 다운로드" in response.text
+    assert "/api/match-runs/" in response.text
     inventory = client.get("/api/inventory", params={"part_number": "MTG011114", "origin": "CN"})
     assert inventory.json()["remaining_qty"] == 12
 
@@ -575,13 +573,14 @@ def test_reports_page_only_exposes_result_download(client):
     assert "매칭 결과가 없습니다" not in response.text
 
 
-def test_inventory_page_translates_status_filter_labels(client):
+def test_inventory_page_uses_source_document_column_names(client):
     response = client.get("/inventory")
 
     assert response.status_code == 200
     assert "조회" in response.text
     assert "사용 가능" in response.text
-    assert "만료 예정" in response.text
-    assert "용어 보기" in response.text
-    assert "수리일" in response.text
-    assert "수입신고 수리일" in response.text
+    assert "만료 예정" not in response.text
+    for header in ["수입신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1"]:
+        assert header in response.text
+    assert "품번" not in response.text
+    assert "수리일" not in response.text

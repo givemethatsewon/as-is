@@ -55,12 +55,8 @@ def clean_part_number(value: object) -> str:
 def plan_export_rows(
     exports: Iterable[ExportRow],
     lots: Iterable[InventoryLot],
-    eligibility_days: int,
 ) -> list[PlannedExport]:
     """Plan allocations in memory without mutating inventory or ORM objects."""
-    if eligibility_days < 0:
-        raise ValueError("eligibility_days must be zero or greater")
-
     ordered_lots = sorted(
         lots,
         key=lambda lot: (
@@ -84,12 +80,6 @@ def plan_export_rows(
             if remaining <= 0:
                 continue
             if clean_part_number(lot.part_number) != clean_part_number(export.part_number):
-                continue
-            if lot.origin != export.origin:
-                continue
-
-            age_days = (export.export_date - lot.import_accepted_date).days
-            if age_days < 0 or age_days > eligibility_days:
                 continue
 
             quantity = min(needed, remaining)

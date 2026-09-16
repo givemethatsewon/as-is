@@ -92,7 +92,6 @@ def test_export_preview_is_read_only_and_reserves_across_rows(db_session) -> Non
         db_session,
         [export_row(qty=7, seq="1"), export_row(qty=7, seq="2")],
         "exports.xlsx",
-        eligibility_days=720,
     )
 
     db_session.refresh(lot)
@@ -121,7 +120,7 @@ def test_stale_export_preview_is_rejected_without_stock_mutation(db_session) -> 
         part="PN-1",
         qty=10,
     )
-    preview = preview_export_run(db_session, [export_row(qty=5)], "exports.xlsx", eligibility_days=720)
+    preview = preview_export_run(db_session, [export_row(qty=5)], "exports.xlsx")
     lot.remaining_qty = 9
     db_session.commit()
 
@@ -143,7 +142,7 @@ def test_partial_match_confirmation_keeps_allocation_and_shortage(db_session) ->
         qty=10,
         hs_code="8501",
     )
-    preview = preview_export_run(db_session, [export_row(qty=15)], "exports.xlsx", eligibility_days=720)
+    preview = preview_export_run(db_session, [export_row(qty=15)], "exports.xlsx")
 
     result = confirm_match_run(db_session, preview.batch.id)
 
@@ -181,7 +180,7 @@ def test_export_batch_revert_restores_exact_balances_once_and_keeps_history(db_s
         part="PN-1",
         qty=6,
     )
-    preview = preview_export_run(db_session, [export_row(qty=8)], "exports.xlsx", eligibility_days=720)
+    preview = preview_export_run(db_session, [export_row(qty=8)], "exports.xlsx")
     confirm_match_run(db_session, preview.batch.id)
 
     result = revert_match_run(db_session, preview.batch.id)

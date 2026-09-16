@@ -13,7 +13,6 @@ EXPECTED_BATCH_COLUMNS = {
     "source_size_bytes",
     "status",
     "processed_rows",
-    "eligibility_days",
     "inventory_fingerprint",
     "error_message",
     "result_path",
@@ -51,12 +50,16 @@ def test_existing_sqlite_schema_is_migrated_idempotently() -> None:
                 """
             )
         )
+        connection.execute(text("CREATE TABLE export_requirements (id VARCHAR(36) PRIMARY KEY)"))
 
     migrate_sqlite_schema(engine)
     migrate_sqlite_schema(engine)
     inspector = inspect(engine)
 
     assert EXPECTED_BATCH_COLUMNS <= {column["name"] for column in inspector.get_columns("upload_batches")}
+    assert {"upload_batch_id", "order_no", "seq_no", "line_no", "qty_unit"} <= {
+        column["name"] for column in inspector.get_columns("export_requirements")
+    }
     assert {"processing_jobs", "planned_allocations"} <= set(inspector.get_table_names())
 
 
@@ -64,7 +67,7 @@ def test_job_and_plan_records_are_persisted() -> None:
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
-        batch = UploadBatch(upload_type="exports", filename="exports.xlsx", eligibility_days=720)
+        batch = UploadBatch(upload_type="exports", filename="exports.xlsx")
         session.add(batch)
         session.flush()
         preview_row = UploadPreviewRow(
@@ -102,4 +105,3 @@ def test_job_and_plan_records_are_persisted() -> None:
 
         assert session.get(ProcessingJob, job.id).status == "queued"
         assert session.get(PlannedAllocation, plan.id).matched_qty == 4
-

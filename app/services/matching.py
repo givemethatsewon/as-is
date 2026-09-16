@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch
-from app.services.policy import EXPIRING_SOON_START_DAYS, MATCH_WINDOW_DAYS
+from app.services.allocation_plans import clean_part_number
 
 
 MATCHABLE_EXPORT_STATUSES = {"pending", "partial_matched", "insufficient_stock"}
@@ -26,17 +26,7 @@ def update_lot_status(lot: ImportLot, reference_date: date | None = None) -> Non
     if lot.remaining_qty <= 0:
         lot.status = "used_up"
         return
-    if reference_date is None:
-        lot.status = "available"
-        return
-
-    age_days = (reference_date - lot.import_accepted_date).days
-    if age_days > MATCH_WINDOW_DAYS:
-        lot.status = "expired"
-    elif age_days >= EXPIRING_SOON_START_DAYS:
-        lot.status = "expiring_soon"
-    else:
-        lot.status = "available"
+    lot.status = "available"
 
 
 def run_matching(db: Session, export_date: date | None = None) -> MatchingSummary:
@@ -104,17 +94,14 @@ def allocate_export(db: Session, export: ExportRequirement) -> int:
         export.status = "matched"
         return 0
 
-    mark_expired_lots(db, export)
     candidates = list(
         db.scalars(
             select(ImportLot)
             .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
             .where(
-                # 핵심 조건: 품번 동일 + 원산지 동일 + 정책 기간 이내 후보 중 잔량이 있는 건만 FIFO로 차감합니다.
-                ImportLot.part_number == export.part_number,
-                ImportLot.origin == export.origin,
+                # Match eligibility is Part Number equality only. Positive balance and FIFO are allocation mechanics.
+                ImportLot.part_number == clean_part_number(export.part_number),
                 ImportLot.remaining_qty > 0,
-                ImportLot.import_accepted_date <= export.export_date,
                 (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
             )
             .order_by(
@@ -128,10 +115,6 @@ def allocate_export(db: Session, export: ExportRequirement) -> int:
 
     created = 0
     for lot in candidates:
-        age_days = (export.export_date - lot.import_accepted_date).days
-        if age_days > MATCH_WINDOW_DAYS:
-            lot.status = "expired"
-            continue
         if required <= 0:
             break
 
@@ -170,22 +153,6 @@ def allocate_export(db: Session, export: ExportRequirement) -> int:
         allocation.match_status = export.status
 
     return created
-
-
-def mark_expired_lots(db: Session, export: ExportRequirement) -> None:
-    lots = db.scalars(
-        select(ImportLot)
-        .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
-        .where(
-            ImportLot.part_number == export.part_number,
-            ImportLot.origin == export.origin,
-            ImportLot.remaining_qty > 0,
-            ImportLot.import_accepted_date <= export.export_date,
-            (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
-        )
-    )
-    for lot in lots:
-        update_lot_status(lot, export.export_date)
 
 
 def _expected_refund(matched_qty: int, duty_per_unit: Decimal | None) -> Decimal | None:

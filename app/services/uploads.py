@@ -43,7 +43,9 @@ EXPORT_OPTIONAL_COLUMNS = {
     "seq_no",
     "origin",
     "hs_code",
+    "line_no",
     "description",
+    "qty_unit",
     "unit_price",
     "amount",
 }
@@ -76,6 +78,7 @@ EXPORT_COLUMN_ALIASES = {
     "origin": ["origin", "원산지"],
     "part_number": ["part_number", "Part Number", "판매부번", "품번", "규격1"],
     "hs_code": ["hs_code", "HS Code", "세번", "세번코드", "HS코드", "세번부호"],
+    "line_no": ["line_no", "란번호", "란번", "란번호2"],
     "required_qty": [
         "required_qty",
         "수출요청수량",
@@ -91,6 +94,7 @@ EXPORT_COLUMN_ALIASES = {
         "수량_1",
     ],
     "description": ["description", "Description", "품명", "규격", "규격2", "설명"],
+    "qty_unit": ["qty_unit", "unit", "수량단위", "수량단위_1"],
     "unit_price": ["unit_price", "단가", "U/Price", "Unit Price"],
     "amount": ["amount", "Amount", "금액", "합계금액"],
 }
@@ -109,8 +113,8 @@ CANONICAL_FIELD_DESCRIPTIONS = {
     "spec": "규격 또는 품명",
     "import_qty": "수입 수량",
     "remaining_qty": "잔량 수량",
-    "qty_unit": "수량 단위",
     "description": "수출 품명 또는 설명",
+    "qty_unit": "수량단위_1",
     "unit_price": "수출 단가",
     "amount": "수출 금액",
 }
@@ -247,8 +251,10 @@ def normalize_export_row(row: dict[str, Any]) -> dict[str, Any]:
         "origin": clean_text(row.get("origin")).upper(),
         "part_number": clean_part_number(row.get("part_number")),
         "hs_code": optional_text(row.get("hs_code")),
+        "line_no": optional_text(row.get("line_no")),
         "required_qty": required_qty,
         "description": optional_text(row.get("description")),
+        "qty_unit": optional_text(row.get("qty_unit")),
         "unit_price": unit_price,
         "amount": amount,
     }
@@ -396,7 +402,6 @@ def preview_exports(
     db: Session,
     rows: list[dict[str, Any]],
     filename: str,
-    additional_origins: dict[str, set[str]] | None = None,
     *,
     batch: UploadBatch | None = None,
 ) -> PreviewResult:
@@ -412,12 +417,6 @@ def preview_exports(
     for index, row in enumerate(rows, start=2):
         try:
             payload = normalize_export_row(row)
-            if not payload["origin"]:
-                payload["origin"] = _infer_origin_for_export(
-                    db,
-                    payload["part_number"],
-                    (additional_origins or {}).get(payload["part_number"]),
-                )
             status, message = "new", "Ready to insert."
         except ValueError as exc:
             payload = {key: clean_text(value) for key, value in row.items()}
@@ -440,25 +439,6 @@ def preview_exports(
     db.commit()
     db.refresh(batch)
     return PreviewResult(batch=batch, warnings=[], column_mapping=column_mapping)
-
-
-def _infer_origin_for_export(db: Session, part_number: str, additional_origins: set[str] | None = None) -> str:
-    origins = set(
-        db.scalars(
-            select(ImportLot.origin)
-            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
-            .where(
-                ImportLot.part_number == part_number,
-                (ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)),
-            )
-        ).all()
-    )
-    origins.update(additional_origins or set())
-    if len(origins) == 1:
-        return origins.pop()
-    if not origins:
-        raise ValueError(f"origin is required because no remaining import stock was found for {part_number}.")
-    raise ValueError(f"origin is required because multiple origins exist for {part_number}: {', '.join(sorted(origins))}.")
 
 
 def _apply_status_counts(batch: UploadBatch, statuses: Counter[str]) -> None:
@@ -609,10 +589,12 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
                         export_date=parse_date(payload["export_date"], "export_date"),
                         order_no=payload.get("order_no"),
                         seq_no=payload.get("seq_no"),
-                        origin=payload["origin"],
+                    origin=payload["origin"],
                     part_number=payload["part_number"],
                     hs_code=payload.get("hs_code"),
+                    line_no=payload.get("line_no"),
                     description=payload.get("description"),
+                    qty_unit=payload.get("qty_unit"),
                     unit_price=parse_decimal(payload.get("unit_price"), "unit_price"),
                     required_qty=payload["required_qty"],
                     amount=parse_decimal(payload.get("amount"), "amount"),
@@ -665,12 +647,10 @@ def preview_export_run(
     rows: list[dict[str, Any]],
     filename: str,
     *,
-    eligibility_days: int = 720,
     batch: UploadBatch | None = None,
 ) -> PreviewResult:
     result = preview_exports(db, rows, filename, batch=batch)
     batch = result.batch
-    batch.eligibility_days = eligibility_days
     batch.status = "review_ready"
     batch.inventory_fingerprint = inventory_fingerprint(db)
 
@@ -698,7 +678,7 @@ def preview_export_run(
             .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
         )
     )
-    plans = plan_export_rows(export_adapters, lots, eligibility_days)
+    plans = plan_export_rows(export_adapters, lots)
     for plan in plans:
         sequence = 1
         for allocation in plan.allocations:
@@ -773,7 +753,9 @@ def confirm_match_run(db: Session, batch_id: str) -> dict[str, int | str]:
                 origin=payload["origin"],
                 part_number=payload["part_number"],
                 hs_code=payload.get("hs_code"),
+                line_no=payload.get("line_no"),
                 description=payload.get("description"),
+                qty_unit=payload.get("qty_unit"),
                 unit_price=parse_decimal(payload.get("unit_price"), "unit_price"),
                 required_qty=payload["required_qty"],
                 amount=parse_decimal(payload.get("amount"), "amount"),

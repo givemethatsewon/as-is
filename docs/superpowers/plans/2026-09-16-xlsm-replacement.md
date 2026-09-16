@@ -10,11 +10,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-16-xlsm-replacement-design.md`
 
+> **Requirement override (2026-09-16):** The customs operator confirmed that normalized Part Number equality is the only matching eligibility condition. Origin and date restrictions, the 720-day setting, and translated source-column labels are superseded by this decision. FIFO remains the allocation order.
+
 ## Global Constraints
 
 - The exact supplied import/export workbooks and the macro inventory sheet must remain readable.
 - Preview must never mutate inventory; confirm and revert must be atomic.
-- Matching uses normalized Part Number, origin, FIFO, and an inclusive configurable 720-day default.
+- Matching uses normalized Part Number as its only eligibility condition and FIFO as its allocation order.
 - HS code, specification, unit, price, and amount are not match keys.
 - No manual entry, personal accounts, import reversion, or automatic shortage retry.
 - Tests must precede production changes and be observed failing for the intended reason.
@@ -30,9 +32,9 @@
 
 **Interfaces:**
 - Produces `clean_part_number(value) -> str`.
-- Produces `plan_export_rows(exports, lots, eligibility_days) -> list[PlannedExport]` with allocation and shortage records.
+- Produces `plan_export_rows(exports, lots) -> list[PlannedExport]` with allocation and shortage records.
 
-- [ ] Write literal fixture tests for whitespace normalization, origin exclusion, HS-code non-blocking behavior, 720/721-day boundaries, FIFO tie-breaking, zero balance, split allocation, and shortage.
+- [ ] Write literal fixture tests for whitespace normalization, origin/date non-blocking behavior, FIFO tie-breaking, zero balance, split allocation, and shortage.
 - [ ] Run `pytest tests/test_allocation_plans.py -q` and verify failures are caused by the missing module.
 - [ ] Implement immutable planning dataclasses and the in-memory planner without database writes.
 - [ ] Run the targeted tests, then `pytest -q`.
@@ -93,7 +95,7 @@
 - [ ] Run targeted and full tests.
 - [ ] Commit workflow behavior.
 
-### Task 5: Shared authentication and settings
+### Task 5: Shared authentication
 
 **Files:**
 - Create: `app/auth.py`
@@ -102,10 +104,10 @@
 - Test: `tests/test_auth_and_settings.py`
 
 **Interfaces:**
-- Add `/login`, `/logout`, and matching-settings endpoints.
+- Add `/login` and `/logout` endpoints.
 - Read `APP_USERNAME`, `APP_PASSWORD_HASH`, and `SESSION_SECRET` from the environment.
 
-- [ ] Write tests for PBKDF2 verification, protected routes, CSRF failures, secure session behavior, throttled login, and the 720-day setting snapshot.
+- [ ] Write tests for PBKDF2 verification, protected routes, CSRF failures, secure session behavior, and throttled login.
 - [ ] Observe the intended failures.
 - [ ] Implement session authentication, CSRF, throttling, and persistent settings.
 - [ ] Run targeted and full tests.

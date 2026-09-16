@@ -5,6 +5,8 @@
 
 # PRD: 처음처럼 - 원상태수출관리
 
+> **최신 결정(2026-09-16):** 매칭 eligibility는 정규화된 Part Number(`규격1`) equality 하나뿐이다. `원산지`, date, `세번` 등은 결과 증빙 값으로만 보존하며 매칭을 차단하지 않는다. 아래의 720일·원산지 조건 관련 초기 논의는 이 결정으로 대체된다. 화면과 결과 Excel의 source column name은 `수입 문서.xlsx`·`수출 문서.xlsx` header를 번역하지 않고 그대로 사용한다.
+
 **English Name:** As-Is
 **Product Type:** Web Application
 **Goal:** 수입 물품의 원상태 수출 가능 여부, 잔량, 수출 매칭 내역을 자동 관리하는 웹 기반 관세환급 관리 시스템

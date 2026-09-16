@@ -17,12 +17,10 @@ Replace the operational Excel macro with a trusted import-inventory ledger and a
 ## Matching rules
 
 - Normalize Part Number by removing spaces, non-breaking spaces, tabs, carriage returns, and line feeds, then uppercase it.
-- Require equal normalized Part Number and equal origin.
-- Require `import_accepted_date <= export_date`.
-- Require `(export_date - import_accepted_date).days <= eligibility_days`; the default is 720 and is editable.
+- Equal normalized Part Number is the only eligibility condition.
 - Require positive remaining quantity.
 - Order candidates by import accepted date, declaration number, line number, and row number.
-- Do not use HS code, specification, unit, price, or amount as match keys.
+- Do not use origin, date, HS code, specification, unit, price, or amount as match keys.
 - Copy the selected import lot's HS code and specification into each allocation result.
 - Allocate across multiple lots until the export quantity is satisfied or inventory is exhausted.
 - Preserve successful allocations and append one `NO MATCH` row for any shortage.
@@ -41,7 +39,7 @@ Replace the operational Excel macro with a trusted import-inventory ledger and a
 ## UI
 
 - The primary page is an operations workbench with separate `수입 재고 추가` and `수출 매칭 시작` actions.
-- Navigation is limited to workbench, inventory, history, and settings.
+- Navigation is limited to workbench, inventory, and history.
 - Uploads show queued, processing, review-ready, failed, confirmed, and reverted states.
 - Export review groups rows by the original export line; expanding a row shows its import allocations and shortage.
 - All large tables use server-side search, filters, ordering, and 50-row pagination.
@@ -51,8 +49,9 @@ Replace the operational Excel macro with a trusted import-inventory ledger and a
 
 - Accept `.xlsx`, `.xlsm`, and `.csv`; never execute VBA.
 - Store the original file under `/data/uploads/<uuid>/` with its hash and safe filename.
-- The result workbook repeats original export fields for each allocation and appends import evidence columns; shortages use `NO MATCH`.
-- The second workbook sheet contains the current import-lot balance.
+- The result workbook uses two header rows: source groups on top, then the exact ten source column names from `수출 문서.xlsx` and `수입 문서.xlsx`; shortages use `NO MATCH`.
+- Each allocation exposes `차감 전 수량`, `차감 수량`, and `차감 후 잔량`; shortages expose `미배정 수량`.
+- The second workbook sheet contains the exact ten import source columns plus `차감 수량` and `차감 후 잔량`.
 - Preserve price and amount when supplied but never use them for matching.
 - Protect every non-health route with one shared environment-configured account.
 - Use a signed HTTPS-only session cookie, CSRF protection, PBKDF2 password verification, and login throttling.

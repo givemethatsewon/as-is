@@ -44,19 +44,21 @@ def test_fifo_split_allocation(db_session):
     assert second.remaining_qty == 912
 
 
-def test_origin_mismatch_is_excluded(db_session):
-    add_import_lot(db_session, declaration="A", accepted=date(2025, 1, 1), origin="KR", part="PN1", qty=100)
+def test_origin_mismatch_does_not_block_same_part_number(db_session):
+    lot = add_import_lot(db_session, declaration="A", accepted=date(2025, 1, 1), origin="KR", part="PN1", qty=100)
     export = add_export_requirement(db_session, exported=date(2025, 2, 1), origin="CN", part="PN1", qty=10)
 
     run_matching(db_session)
 
+    db_session.refresh(lot)
     db_session.refresh(export)
     allocation_count = db_session.scalar(select(func.count(ExportAllocation.id)))
-    assert export.status == "insufficient_stock"
-    assert allocation_count == 0
+    assert export.status == "matched"
+    assert lot.remaining_qty == 90
+    assert allocation_count == 1
 
 
-def test_720_day_policy_allows_lot_after_one_year(db_session):
+def test_same_part_number_matches_after_one_year(db_session):
     lot = add_import_lot(db_session, declaration="A", accepted=date(2025, 1, 1), origin="CN", part="PN1", qty=100)
     export = add_export_requirement(db_session, exported=date(2025, 12, 28), origin="CN", part="PN1", qty=10)
 
@@ -69,7 +71,7 @@ def test_720_day_policy_allows_lot_after_one_year(db_session):
     assert export.status == "matched"
 
 
-def test_720_day_expired_lot_is_excluded(db_session):
+def test_old_lot_does_not_block_same_part_number(db_session):
     lot = add_import_lot(db_session, declaration="A", accepted=date(2025, 1, 1), origin="CN", part="PN1", qty=100)
     export = add_export_requirement(db_session, exported=date(2027, 1, 1), origin="CN", part="PN1", qty=10)
 
@@ -77,9 +79,21 @@ def test_720_day_expired_lot_is_excluded(db_session):
 
     db_session.refresh(lot)
     db_session.refresh(export)
-    assert lot.status == "expired"
-    assert lot.remaining_qty == 100
-    assert export.status == "insufficient_stock"
+    assert lot.status == "available"
+    assert lot.remaining_qty == 90
+    assert export.status == "matched"
+
+
+def test_import_date_after_export_date_does_not_block_same_part_number(db_session):
+    lot = add_import_lot(db_session, declaration="A", accepted=date(2025, 3, 1), origin="VN", part="PN1", qty=100)
+    export = add_export_requirement(db_session, exported=date(2025, 2, 1), origin="CN", part="PN1", qty=10)
+
+    run_matching(db_session)
+
+    db_session.refresh(lot)
+    db_session.refresh(export)
+    assert lot.remaining_qty == 90
+    assert export.status == "matched"
 
 
 def test_insufficient_stock_becomes_partial_when_some_qty_allocated(db_session):

@@ -5,7 +5,6 @@ from decimal import Decimal
 from io import BytesIO, StringIO
 from typing import Any
 
-import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -27,70 +26,6 @@ STATUS_LABELS = {
     "partial_matched": "일부 매칭",
     "insufficient_stock": "재고 부족",
 }
-
-SHEET_CONFIG = {
-    "수입신고별 잔량": {
-        "source": "import_lots_with_remaining",
-        "headers": {
-            "import_declaration_no": "수입신고번호",
-            "import_accepted_date": "수리일",
-            "origin": "원산지",
-            "hs_code": "HS 코드",
-            "line_no": "란번호",
-            "row_no": "행번호",
-            "part_number": "품번",
-            "spec": "규격/품명",
-            "import_qty": "수입 수량",
-            "used_qty": "사용 수량",
-            "remaining_qty": "남은 수량",
-            "qty_unit": "수량 단위",
-            "status": "상태",
-        },
-    },
-    "수출건별 수입근거 매칭": {
-        "source": "export_match_allocations",
-        "headers": {
-            "export_date": "수출일",
-            "order_no": "Order No",
-            "seq_no": "Seq No",
-            "part_number": "품번",
-            "description": "설명",
-            "unit_price": "단가",
-            "required_qty": "필요 수량",
-            "amount": "금액",
-            "matched_qty": "매칭 수량",
-            "import_declaration_no": "수입신고번호",
-            "import_accepted_date": "수입수리일",
-            "origin": "원산지",
-            "hs_code": "HS 코드",
-            "line_no": "수입 란번호",
-            "row_no": "수입 행번호",
-            "remaining_qty_after": "매칭 후 잔량",
-            "shortage_qty": "부족 수량",
-            "match_status": "매칭 상태",
-            "hs_code_warning": "HS 코드 확인",
-            "expected_refund_amount": "환급예상",
-        },
-    },
-    "요약": {
-        "source": "dashboard_summary",
-        "headers": {
-            "metric": "항목",
-            "value": "값",
-        },
-    },
-    "품번별 재고 요약": {
-        "source": "inventory_summary",
-        "headers": {
-            "part_number": "품번",
-            "origin": "원산지",
-            "total_imported_qty": "총 수입 수량",
-            "total_exported_qty": "총 사용 수량",
-            "remaining_qty": "남은 수량",
-        },
-    },
-}
-
 
 def import_lot_rows(db: Session) -> list[dict[str, Any]]:
     lots = db.scalars(
@@ -162,8 +97,12 @@ def _base_export_report_row(export: ExportRequirement) -> dict[str, Any]:
         "export_date": export.export_date.isoformat(),
         "order_no": export.order_no,
         "seq_no": export.seq_no,
+        "export_origin": export.origin,
+        "export_hs_code": export.hs_code,
+        "export_line_no": export.line_no,
         "part_number": export.part_number,
         "description": export.description,
+        "export_qty_unit": export.qty_unit,
         "unit_price": export.unit_price,
         "required_qty": export.required_qty,
         "amount": export.amount,
@@ -178,9 +117,15 @@ def _allocation_report_row(export: ExportRequirement, allocation: ExportAllocati
             "import_declaration_no": lot.import_declaration_no,
             "import_accepted_date": lot.import_accepted_date.isoformat(),
             "origin": lot.origin,
+            "import_origin": lot.origin,
             "hs_code": lot.hs_code,
             "line_no": lot.line_no,
             "row_no": lot.row_no,
+            "import_part_number": lot.part_number,
+            "import_spec": lot.spec,
+            "import_qty": lot.import_qty,
+            "import_qty_unit": lot.qty_unit,
+            "remaining_qty_before": allocation.remaining_qty_after + allocation.matched_qty,
             "remaining_qty_after": allocation.remaining_qty_after,
             "shortage_qty": 0,
             "match_status": STATUS_LABELS.get(export.status, export.status),
@@ -199,9 +144,15 @@ def _no_match_report_row(export: ExportRequirement, shortage_qty: int) -> dict[s
             "import_declaration_no": "NO MATCH",
             "import_accepted_date": "",
             "origin": export.origin,
+            "import_origin": "",
             "hs_code": "",
             "line_no": "",
             "row_no": "",
+            "import_part_number": "",
+            "import_spec": "",
+            "import_qty": None,
+            "import_qty_unit": "",
+            "remaining_qty_before": None,
             "remaining_qty_after": "",
             "shortage_qty": shortage_qty,
             "match_status": "NO MATCH",
@@ -254,36 +205,146 @@ def rows_to_csv(rows: list[dict[str, Any]]) -> str:
 
 
 def refund_report_xlsx(db: Session) -> bytes:
+    latest_batch = db.scalar(
+        select(UploadBatch)
+        .where(
+            UploadBatch.upload_type == "exports",
+            UploadBatch.confirmed_at.is_not(None),
+            UploadBatch.invalidated_at.is_(None),
+        )
+        .order_by(UploadBatch.confirmed_at.desc(), UploadBatch.created_at.desc())
+        .limit(1)
+    )
+    if latest_batch is not None:
+        return matching_run_workbook(db, latest_batch.id)
     return video_style_export_result_xlsx(db)
 
 
+def _append_matching_headers(result_sheet) -> None:
+    source_export_headers = [
+        "수출신고번호",
+        "신고일자",
+        "원산지",
+        "세번",
+        "란번호2",
+        "행번호",
+        "규격1",
+        "규격2",
+        "수량_1",
+        "수량단위_1",
+    ]
+    source_import_headers = [
+        "수입신고번호",
+        "신고일자",
+        "원산지",
+        "세번",
+        "란번호2",
+        "행번호",
+        "규격1",
+        "규격2",
+        "수량_1",
+        "수량단위_1",
+    ]
+    deduction_headers = ["차감 전 수량", "차감 수량", "차감 후 잔량", "미배정 수량"]
+    result_sheet.append(
+        ["수출 문서", *(None for _ in range(9)), "차감 대상 수입 문서", *(None for _ in range(9)), "차감 결과", None, None, None]
+    )
+    result_sheet.append([*source_export_headers, *source_import_headers, *deduction_headers])
+    result_sheet.merge_cells("A1:J1")
+    result_sheet.merge_cells("K1:T1")
+    result_sheet.merge_cells("U1:X1")
+
+
+def _append_inventory_sheet(workbook: Workbook, db: Session) -> None:
+    inventory_sheet = workbook.create_sheet("원상태잔량")
+    inventory_sheet.append(
+        [
+            "수입신고번호",
+            "신고일자",
+            "원산지",
+            "세번",
+            "란번호2",
+            "행번호",
+            "규격1",
+            "규격2",
+            "수량_1",
+            "수량단위_1",
+            "차감 수량",
+            "차감 후 잔량",
+        ]
+    )
+    lots = list(
+        db.scalars(
+            select(ImportLot)
+            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+            .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+            .order_by(
+                ImportLot.import_accepted_date,
+                ImportLot.import_declaration_no,
+                ImportLot.line_no,
+                ImportLot.row_no,
+            )
+        )
+    )
+    for lot in lots:
+        inventory_sheet.append(
+            [
+                lot.import_declaration_no,
+                lot.import_accepted_date.strftime("%Y%m%d"),
+                lot.origin,
+                lot.hs_code,
+                lot.line_no,
+                lot.row_no,
+                lot.part_number,
+                lot.spec,
+                lot.import_qty,
+                lot.qty_unit,
+                lot.used_qty,
+                lot.remaining_qty,
+            ]
+        )
+    _style_report_sheet(inventory_sheet)
+
+
 def video_style_export_result_xlsx(db: Session) -> bytes:
+    workbook = Workbook()
+    result_sheet = workbook.active
+    result_sheet.title = "수출 결과"
+    _append_matching_headers(result_sheet)
+    for row in allocation_rows(db):
+        result_sheet.append(
+            [
+                row.get("order_no"),
+                str(row.get("export_date") or "").replace("-", ""),
+                row.get("export_origin"),
+                row.get("export_hs_code"),
+                row.get("export_line_no"),
+                row.get("seq_no"),
+                row.get("part_number"),
+                row.get("description"),
+                row.get("required_qty"),
+                row.get("export_qty_unit"),
+                row.get("import_declaration_no"),
+                str(row.get("import_accepted_date") or "").replace("-", ""),
+                row.get("import_origin"),
+                row.get("hs_code"),
+                row.get("line_no"),
+                row.get("row_no"),
+                row.get("import_part_number"),
+                row.get("import_spec"),
+                row.get("import_qty"),
+                row.get("import_qty_unit"),
+                row.get("remaining_qty_before"),
+                row.get("matched_qty"),
+                row.get("remaining_qty_after"),
+                row.get("shortage_qty"),
+            ]
+        )
+    _append_inventory_sheet(workbook, db)
+    _style_matching_result_sheet(result_sheet)
     output = BytesIO()
-    headers = {
-        "order_no": "Order No",
-        "seq_no": "Seq No",
-        "part_number": "Part Number",
-        "description": "Description",
-        "unit_price": "U/Price",
-        "required_qty": "Ready to Ship Qty",
-        "amount": "Amount",
-        "origin": "원산지",
-        "import_declaration_no": "수입신고번호",
-        "import_accepted_date": "수리일",
-        "hs_code": "세번",
-        "line_no": "수입 란번호",
-        "row_no": "수입 행번호",
-        "matched_qty": "매칭 수량",
-        "remaining_qty_after": "매칭 후 잔량",
-        "shortage_qty": "부족 수량",
-        "match_status": "매칭 상태",
-    }
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        frame = pd.DataFrame(allocation_rows(db), columns=headers.keys()).rename(columns=headers)
-        frame.to_excel(writer, sheet_name="수출 결과", index=False)
-        _style_report_sheet(writer.sheets["수출 결과"])
-    output.seek(0)
-    return output.read()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def matching_run_workbook(db: Session, batch_id: str) -> bytes:
@@ -296,28 +357,7 @@ def matching_run_workbook(db: Session, batch_id: str) -> bytes:
     workbook = Workbook()
     result_sheet = workbook.active
     result_sheet.title = "수출 결과"
-    result_headers = [
-        "Order No",
-        "Seq No",
-        "Part Number",
-        "Description",
-        "U/Price",
-        "Ready to Ship Qty",
-        "Amount",
-        "수출 원산지",
-        "매칭 상태",
-        "수입신고번호",
-        "수리일",
-        "원산지",
-        "세번",
-        "수입 란번호",
-        "수입 행번호",
-        "수입 규격",
-        "매칭 수량",
-        "매칭 후 잔량",
-        "부족 수량",
-    ]
-    result_sheet.append(result_headers)
+    _append_matching_headers(result_sheet)
 
     requirements = list(
         db.scalars(
@@ -341,14 +381,15 @@ def matching_run_workbook(db: Session, batch_id: str) -> bytes:
             result_sheet.append(
                 _matching_result_values(
                     export,
-                    status=export.status,
                     declaration=lot.import_declaration_no,
-                    accepted_date=lot.import_accepted_date.isoformat(),
+                    accepted_date=lot.import_accepted_date.strftime("%Y%m%d"),
                     import_origin=lot.origin,
                     hs_code=lot.hs_code,
                     line_no=lot.line_no,
                     row_no=lot.row_no,
                     import_spec=lot.spec,
+                    import_qty=lot.import_qty,
+                    import_qty_unit=lot.qty_unit,
                     matched_qty=allocation.matched_qty,
                     remaining_qty_after=allocation.remaining_qty_after,
                     shortage_qty=0,
@@ -361,7 +402,6 @@ def matching_run_workbook(db: Session, batch_id: str) -> bytes:
             result_sheet.append(
                 _matching_result_values(
                     export,
-                    status="NO MATCH",
                     declaration="NO MATCH",
                     accepted_date=None,
                     import_origin=None,
@@ -369,63 +409,16 @@ def matching_run_workbook(db: Session, batch_id: str) -> bytes:
                     line_no=None,
                     row_no=None,
                     import_spec=None,
+                    import_qty=None,
+                    import_qty_unit=None,
                     matched_qty=0,
                     remaining_qty_after=None,
                     shortage_qty=shortage_qty,
                 )
             )
 
-    inventory_sheet = workbook.create_sheet("원상태잔량")
-    inventory_headers = [
-        "수입신고번호",
-        "수리일",
-        "원산지",
-        "세번",
-        "란번호",
-        "행번호",
-        "Part Number",
-        "규격",
-        "수입 수량",
-        "사용 수량",
-        "잔량",
-        "수량단위",
-        "상태",
-    ]
-    inventory_sheet.append(inventory_headers)
-    lots = list(
-        db.scalars(
-            select(ImportLot)
-            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
-            .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
-            .order_by(
-                ImportLot.import_accepted_date,
-                ImportLot.import_declaration_no,
-                ImportLot.line_no,
-                ImportLot.row_no,
-            )
-        )
-    )
-    for lot in lots:
-        inventory_sheet.append(
-            [
-                lot.import_declaration_no,
-                lot.import_accepted_date.isoformat(),
-                lot.origin,
-                lot.hs_code,
-                lot.line_no,
-                lot.row_no,
-                lot.part_number,
-                lot.spec,
-                lot.import_qty,
-                lot.used_qty,
-                lot.remaining_qty,
-                lot.qty_unit,
-                STATUS_LABELS.get(lot.status, lot.status),
-            ]
-        )
-
-    _style_report_sheet(result_sheet)
-    _style_report_sheet(inventory_sheet)
+    _append_inventory_sheet(workbook, db)
+    _style_matching_result_sheet(result_sheet)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -434,7 +427,6 @@ def matching_run_workbook(db: Session, batch_id: str) -> bytes:
 def _matching_result_values(
     export: ExportRequirement,
     *,
-    status: str,
     declaration: str,
     accepted_date: str | None,
     import_origin: str | None,
@@ -442,27 +434,34 @@ def _matching_result_values(
     line_no: str | None,
     row_no: str | None,
     import_spec: str | None,
+    import_qty: int | None,
+    import_qty_unit: str | None,
     matched_qty: int,
     remaining_qty_after: int | None,
     shortage_qty: int,
 ) -> list[Any]:
     return [
         export.order_no,
+        export.export_date.strftime("%Y%m%d"),
+        export.origin,
+        export.hs_code,
+        export.line_no,
         export.seq_no,
         export.part_number,
         export.description,
-        float(export.unit_price) if export.unit_price is not None else None,
         export.required_qty,
-        float(export.amount) if export.amount is not None else None,
-        export.origin,
-        STATUS_LABELS.get(status, status),
+        export.qty_unit,
         declaration,
         accepted_date,
         import_origin,
         hs_code,
         line_no,
         row_no,
+        export.part_number if declaration != "NO MATCH" else None,
         import_spec,
+        import_qty,
+        import_qty_unit,
+        remaining_qty_after + matched_qty if remaining_qty_after is not None else None,
         matched_qty,
         remaining_qty_after,
         shortage_qty,
@@ -470,54 +469,7 @@ def _matching_result_values(
 
 
 def contest_example_report_xlsx(db: Session) -> bytes:
-    output = BytesIO()
-    sheets = {
-        "수출 전 확인용 잔량표": (
-            import_lot_rows(db),
-            {
-                "import_declaration_no": "수입신고번호",
-                "import_accepted_date": "수리일",
-                "origin": "원산지",
-                "hs_code": "세번",
-                "line_no": "란번호",
-                "row_no": "행번호",
-                "part_number": "품번",
-                "import_qty": "수입 수량",
-                "used_qty": "기매칭 수량",
-                "remaining_qty": "잔량",
-                "status": "상태",
-            },
-        ),
-        "수출 건별 수입근거 자동기재표": (
-            allocation_rows(db),
-            {
-                "export_date": "수출일",
-                "order_no": "Order No",
-                "seq_no": "Seq No",
-                "part_number": "Part Number",
-                "description": "Description",
-                "required_qty": "Qty",
-                "amount": "Amount",
-                "import_declaration_no": "수입신고번호",
-                "import_accepted_date": "수리일",
-                "origin": "원산지",
-                "hs_code": "세번",
-                "line_no": "란번호",
-                "row_no": "행번호",
-                "matched_qty": "매칭 수량",
-                "remaining_qty_after": "매칭 후 잔량",
-                "shortage_qty": "부족 수량",
-                "hs_code_warning": "HS 코드 확인",
-            },
-        ),
-    }
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for sheet_name, (rows, headers) in sheets.items():
-            frame = pd.DataFrame(rows, columns=headers.keys()).rename(columns=headers)
-            frame.to_excel(writer, sheet_name=sheet_name, index=False)
-            _style_report_sheet(writer.sheets[sheet_name])
-    output.seek(0)
-    return output.read()
+    return refund_report_xlsx(db)
 
 
 def _style_report_sheet(worksheet) -> None:
@@ -547,3 +499,42 @@ def _style_report_sheet(worksheet) -> None:
         worksheet.column_dimensions[column_letter].width = min(max(max_length + 4, 12), 38)
 
     worksheet.row_dimensions[1].height = 24
+
+
+def _style_matching_result_sheet(worksheet) -> None:
+    group_fills = {
+        "A1:J1": "173F5F",
+        "K1:T1": "0F5F50",
+        "U1:X1": "7A4A0B",
+    }
+    header_font = Font(bold=True, color="FFFFFF")
+    centered = Alignment(horizontal="center", vertical="center")
+    for cell_range, color in group_fills.items():
+        fill = PatternFill("solid", fgColor=color)
+        for row in worksheet[cell_range]:
+            for cell in row:
+                cell.fill = fill
+                cell.font = header_font
+                cell.alignment = centered
+
+    second_header_fill = PatternFill("solid", fgColor="264653")
+    for cell in worksheet[2]:
+        cell.fill = second_header_fill
+        cell.font = header_font
+        cell.alignment = centered
+
+    for row in worksheet.iter_rows(min_row=3):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top")
+            if isinstance(cell.value, (int, float, Decimal)):
+                cell.number_format = "#,##0"
+
+    for column_cells in worksheet.columns:
+        column_letter = get_column_letter(column_cells[0].column)
+        max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column_cells)
+        worksheet.column_dimensions[column_letter].width = min(max(max_length + 4, 12), 38)
+
+    worksheet.freeze_panes = "A3"
+    worksheet.sheet_view.showGridLines = False
+    worksheet.row_dimensions[1].height = 24
+    worksheet.row_dimensions[2].height = 24

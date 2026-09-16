@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch
-from app.services.policy import EXPIRING_SOON_START_DAYS, MATCH_WINDOW_DAYS
 
 
 STATUS_LABELS = {
@@ -18,7 +15,6 @@ STATUS_LABELS = {
 
 
 def dashboard_summary(db: Session) -> dict[str, int]:
-    today = date.today()
     lots = list(db.scalars(_active_import_lot_stmt()))
     total_import_qty = sum(lot.import_qty for lot in lots)
     total_matched_qty = int(
@@ -31,20 +27,10 @@ def dashboard_summary(db: Session) -> dict[str, int]:
         or 0
     )
     total_remaining_qty = sum(lot.remaining_qty for lot in lots)
-    available_qty = sum(
-        lot.remaining_qty
-        for lot in lots
-        if lot.remaining_qty > 0 and 0 <= (today - lot.import_accepted_date).days <= MATCH_WINDOW_DAYS
-    )
-    expired_qty = sum(
-        lot.remaining_qty for lot in lots if lot.remaining_qty > 0 and (today - lot.import_accepted_date).days > MATCH_WINDOW_DAYS
-    )
+    available_qty = sum(lot.remaining_qty for lot in lots if lot.remaining_qty > 0)
+    expired_qty = 0
     used_up_lots_count = sum(1 for lot in lots if lot.remaining_qty == 0 or lot.status == "used_up")
-    expiring_soon_lots_count = sum(
-        1
-        for lot in lots
-        if lot.remaining_qty > 0 and EXPIRING_SOON_START_DAYS <= (today - lot.import_accepted_date).days <= MATCH_WINDOW_DAYS
-    )
+    expiring_soon_lots_count = 0
     return {
         "total_import_qty": total_import_qty,
         "total_matched_qty": total_matched_qty,
@@ -57,39 +43,10 @@ def dashboard_summary(db: Session) -> dict[str, int]:
 
 
 def dashboard_insights(db: Session) -> dict[str, object]:
-    today = date.today()
     return {
-        "expiring_import_lots": expiring_import_lots(db, today),
         "matching_status_distribution": matching_status_distribution(db),
         "hs_code_warning_rows": hs_code_warning_rows(db),
     }
-
-
-def expiring_import_lots(db: Session, today: date, limit: int = 10) -> list[dict[str, object]]:
-    lots = db.scalars(
-        _active_import_lot_stmt()
-        .where(ImportLot.remaining_qty > 0)
-        .order_by(ImportLot.import_accepted_date, ImportLot.part_number, ImportLot.import_declaration_no)
-    )
-    rows = []
-    for lot in lots:
-        expiry_date = lot.import_accepted_date + timedelta(days=MATCH_WINDOW_DAYS)
-        days_left = (expiry_date - today).days
-        if 0 <= days_left <= 30:
-            rows.append(
-                {
-                    "import_declaration_no": lot.import_declaration_no,
-                    "import_accepted_date": lot.import_accepted_date.isoformat(),
-                    "expiry_date": expiry_date.isoformat(),
-                    "days_left": days_left,
-                    "part_number": lot.part_number,
-                    "origin": lot.origin,
-                    "remaining_qty": lot.remaining_qty,
-                    "line_no": lot.line_no,
-                    "row_no": lot.row_no,
-                }
-            )
-    return sorted(rows, key=lambda row: (row["days_left"], row["import_accepted_date"], row["part_number"]))[:limit]
 
 
 def matching_status_distribution(db: Session) -> list[dict[str, object]]:
@@ -176,10 +133,10 @@ def inventory_summary(db: Session, part_number: str | None = None, origin: str |
     total_imported_qty = sum(lot.import_qty for lot in lots)
     total_exported_qty = sum(lot.used_qty for lot in lots)
     remaining_qty = sum(lot.remaining_qty for lot in lots)
-    available_qty = sum(lot.remaining_qty for lot in lots if lot.status in {"available", "expiring_soon"})
-    expired_qty = sum(lot.remaining_qty for lot in lots if lot.status == "expired")
+    available_qty = sum(lot.remaining_qty for lot in lots if lot.remaining_qty > 0)
+    expired_qty = 0
     used_up_lots_count = sum(1 for lot in lots if lot.status == "used_up" or lot.remaining_qty == 0)
-    expiring_soon_lots_count = sum(1 for lot in lots if lot.status == "expiring_soon")
+    expiring_soon_lots_count = 0
     return {
         "part_number": part_number or "",
         "origin": origin or "",

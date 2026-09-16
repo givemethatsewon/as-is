@@ -45,38 +45,53 @@ def test_matching_run_workbook_repeats_export_fields_and_adds_inventory_sheet(db
             "origin": "CN",
             "part_number": "PN-1",
             "hs_code": "EXPORT-HS-IGNORED",
+            "line_no": "007",
             "description": "EXPORT-DESCRIPTION",
             "unit_price": "2.5",
             "required_qty": "9",
+            "qty_unit": "EA",
             "amount": "22.5",
         }
     ]
-    run = preview_export_run(db_session, exports, "exports.xlsx", eligibility_days=720)
+    run = preview_export_run(db_session, exports, "exports.xlsx")
     confirm_match_run(db_session, run.batch.id)
 
     workbook = load_workbook(BytesIO(matching_run_workbook(db_session, run.batch.id)))
 
     assert workbook.sheetnames == ["수출 결과", "원상태잔량"]
     result = workbook["수출 결과"]
-    headers = [cell.value for cell in result[1]]
-    values = [dict(zip(headers, row, strict=True)) for row in result.iter_rows(min_row=2, values_only=True)]
-    assert [row["Order No"] for row in values] == ["ORDER-9", "ORDER-9", "ORDER-9"]
-    assert [row["Seq No"] for row in values] == ["7", "7", "7"]
-    assert [row["U/Price"] for row in values] == [2.5, 2.5, 2.5]
-    assert [row["Amount"] for row in values] == [22.5, 22.5, 22.5]
-    assert [row["수입신고번호"] for row in values] == ["IMP-A", "IMP-B", "NO MATCH"]
-    assert [row["세번"] for row in values[:2]] == ["8501", "8502"]
-    assert [row["수입 규격"] for row in values[:2]] == ["IMPORT-SPEC-A", "IMPORT-SPEC-B"]
-    assert values[-1]["부족 수량"] == 2
-    assert values[-1]["매칭 상태"] == "NO MATCH"
+    assert [cell.value for cell in result[1]] == [
+        "수출 문서", None, None, None, None, None, None, None, None, None,
+        "차감 대상 수입 문서", None, None, None, None, None, None, None, None, None,
+        "차감 결과", None, None, None,
+    ]
+    assert [cell.value for cell in result[2]] == [
+        "수출신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1",
+        "수입신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1",
+        "차감 전 수량", "차감 수량", "차감 후 잔량", "미배정 수량",
+    ]
+    values = list(result.iter_rows(min_row=3, values_only=True))
+    assert [row[0] for row in values] == ["ORDER-9", "ORDER-9", "ORDER-9"]
+    assert [row[4] for row in values] == ["007", "007", "007"]
+    assert [row[5] for row in values] == ["7", "7", "7"]
+    assert [row[9] for row in values] == ["EA", "EA", "EA"]
+    assert [row[10] for row in values] == ["IMP-A", "IMP-B", "NO MATCH"]
+    assert [row[13] for row in values[:2]] == ["8501", "8502"]
+    assert [row[17] for row in values[:2]] == ["IMPORT-SPEC-A", "IMPORT-SPEC-B"]
+    assert [(row[20], row[21], row[22]) for row in values[:2]] == [(4, 4, 0), (3, 3, 0)]
+    assert values[-1][23] == 2
 
     inventory = workbook["원상태잔량"]
     inventory_headers = [cell.value for cell in inventory[1]]
     inventory_rows = [
         dict(zip(inventory_headers, row, strict=True)) for row in inventory.iter_rows(min_row=2, values_only=True)
     ]
+    assert inventory_headers == [
+        "수입신고번호", "신고일자", "원산지", "세번", "란번호2", "행번호", "규격1", "규격2", "수량_1", "수량단위_1",
+        "차감 수량", "차감 후 잔량",
+    ]
     assert [row["수입신고번호"] for row in inventory_rows] == ["IMP-A", "IMP-B"]
-    assert [row["잔량"] for row in inventory_rows] == [0, 0]
+    assert [row["차감 후 잔량"] for row in inventory_rows] == [0, 0]
 
 
 def test_original_upload_can_be_downloaded_from_authenticated_endpoint(client, db_session, tmp_path) -> None:
@@ -99,4 +114,3 @@ def test_original_upload_can_be_downloaded_from_authenticated_endpoint(client, d
     assert response.status_code == 200
     assert response.content == b"original-file"
     assert "filename" in response.headers["content-disposition"]
-

@@ -51,7 +51,6 @@ def _ensure_upload_batch_columns(bind) -> None:
         "source_size_bytes": "INTEGER",
         "status": "VARCHAR(30) NOT NULL DEFAULT 'review_ready'",
         "processed_rows": "INTEGER NOT NULL DEFAULT 0",
-        "eligibility_days": "INTEGER NOT NULL DEFAULT 720",
         "inventory_fingerprint": "VARCHAR(64)",
         "error_message": "TEXT",
         "result_path": "VARCHAR(500)",
@@ -77,6 +76,8 @@ def _ensure_batch_owner_columns(bind) -> None:
             "upload_batch_id": "VARCHAR(36)",
             "order_no": "VARCHAR(120)",
             "seq_no": "VARCHAR(40)",
+            "line_no": "VARCHAR(20)",
+            "qty_unit": "VARCHAR(20)",
         },
     }
     with bind.begin() as connection:

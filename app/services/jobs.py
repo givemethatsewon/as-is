@@ -74,7 +74,6 @@ def process_upload_preview_job(
                     db,
                     rows,
                     batch.filename,
-                    eligibility_days=batch.eligibility_days,
                     batch=batch,
                 )
             else:

@@ -3,21 +3,8 @@ from __future__ import annotations
 from datetime import date
 
 from app.services.matching import run_matching
-from app.services.summaries import expiring_import_lots, hs_code_warning_rows, matching_status_distribution
+from app.services.summaries import hs_code_warning_rows, matching_status_distribution
 from tests.helpers import add_export_requirement, add_import_lot
-
-
-def test_expiring_import_lots_returns_soonest_remaining_lots(db_session):
-    soon = add_import_lot(db_session, declaration="A", accepted=date(2025, 5, 25), origin="CN", part="PN1", qty=10)
-    later = add_import_lot(db_session, declaration="B", accepted=date(2025, 6, 4), origin="CN", part="PN2", qty=20)
-    not_soon = add_import_lot(db_session, declaration="C", accepted=date(2025, 7, 1), origin="CN", part="PN3", qty=30)
-
-    rows = expiring_import_lots(db_session, date(2027, 5, 1))
-
-    assert [row["import_declaration_no"] for row in rows] == [soon.import_declaration_no, later.import_declaration_no]
-    assert rows[0]["days_left"] == 14
-    assert rows[1]["days_left"] == 24
-    assert not_soon.import_declaration_no not in [row["import_declaration_no"] for row in rows]
 
 
 def test_matching_status_distribution_includes_labels_and_percentages(db_session):

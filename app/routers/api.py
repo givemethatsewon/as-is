@@ -26,7 +26,6 @@ from app.services.reports import (
     rows_to_csv,
 )
 from app.services.summaries import inventory_summary
-from app.services.settings import get_eligibility_days
 from app.services.uploads import (
     confirm_batch,
     confirm_match_run,
@@ -42,14 +41,10 @@ router = APIRouter(prefix="/api")
 async def api_create_upload_batch(
     upload_type: str,
     file: UploadFile = File(...),
-    eligibility_days: int | None = Form(None),
     db: Session = Depends(get_db),
 ):
     if upload_type not in {"imports", "exports"}:
         raise HTTPException(status_code=404, detail="지원하지 않는 업로드 종류입니다.")
-    selected_eligibility_days = get_eligibility_days(db) if eligibility_days is None else eligibility_days
-    if selected_eligibility_days < 0:
-        raise HTTPException(status_code=400, detail="매칭 기간은 0일 이상이어야 합니다.")
     try:
         stored = store_upload(file.file, file.filename or "upload")
     except (ValueError, UploadTooLargeError) as exc:
@@ -60,7 +55,6 @@ async def api_create_upload_batch(
         source_path=str(stored.path),
         source_sha256=stored.sha256,
         source_size_bytes=stored.size_bytes,
-        eligibility_days=selected_eligibility_days,
         status="queued",
     )
     db.add(batch)

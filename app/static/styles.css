@@ -147,8 +147,8 @@ a {
 .row-main strong, .row-main small { display: block; }
 .row-main small { color: var(--muted); margin-top: 5px; }
 .expand-label { color: var(--accent-dark); font-size: 12px; font-weight: 850; }
-.allocation-lines { border-top: 1px solid var(--line); }
-.allocation-line { display: grid; gap: 12px; grid-template-columns: 56px 1.5fr 1fr .65fr .8fr .7fr .9fr; padding: 11px 18px; }
+.allocation-lines { border-top: 1px solid var(--line); overflow-x: auto; }
+.allocation-line { display: grid; gap: 12px; grid-template-columns: repeat(13, minmax(110px, 1fr)); min-width: 1580px; padding: 11px 18px; }
 .allocation-line + .allocation-line { border-top: 1px solid #e7ecea; }
 .allocation-head { background: #f5f7f6; color: var(--muted); font-size: 11px; font-weight: 850; }
 .shortage-line { background: rgba(169, 48, 34, 0.06); color: var(--danger); }

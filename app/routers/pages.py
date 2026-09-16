@@ -33,7 +33,6 @@ from app.services.uploads import (
     preview_imports,
     revert_match_run,
 )
-from app.services.settings import get_eligibility_days, set_eligibility_days
 from app.templating import templates
 
 router = APIRouter()
@@ -94,30 +93,13 @@ def logout(request: Request):
 
 
 @router.get("/settings")
-def settings_page(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {"active": "settings", "eligibility_days": get_eligibility_days(db), "message": None},
-    )
+def settings_page():
+    return RedirectResponse(url="/", status_code=303)
 
 
 @router.post("/settings")
-def update_settings_page(request: Request, eligibility_days: int = Form(...), db: Session = Depends(get_db)):
-    try:
-        set_eligibility_days(db, eligibility_days)
-    except ValueError as exc:
-        return templates.TemplateResponse(
-            request,
-            "settings.html",
-            {"active": "settings", "eligibility_days": eligibility_days, "error": str(exc)},
-            status_code=400,
-        )
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {"active": "settings", "eligibility_days": eligibility_days, "message": "설정을 저장했습니다."},
-    )
+def update_settings_page():
+    return RedirectResponse(url="/", status_code=303)
 
 
 @router.get("/")
@@ -253,7 +235,6 @@ async def upload_and_match_page(
             db,
             export_rows,
             export_file.filename or "수출 파일",
-            additional_origins=_preview_origins(import_result.batch),
         )
         batches.append(export_result.batch)
         _raise_for_preview_errors("수출 파일", export_result.batch)
@@ -284,7 +265,12 @@ async def upload_and_match_page(
     return templates.TemplateResponse(
         request,
         "exports.html",
-        {"active": "exports", "exports": exports, "message": message},
+        {
+            "active": "exports",
+            "exports": exports,
+            "message": message,
+            "result_batch_id": export_result.batch.id,
+        },
     )
 
 
@@ -468,19 +454,6 @@ def _preview_template(request: Request, batch: UploadBatch):
 
 def _upload_redirect(message: str) -> RedirectResponse:
     return RedirectResponse(url=f"/upload?{urlencode({'message': message})}", status_code=303)
-
-
-def _preview_origins(batch: UploadBatch) -> dict[str, set[str]]:
-    origins: dict[str, set[str]] = {}
-    for row in batch.rows:
-        if row.row_status not in {"new", "reactivate"}:
-            continue
-        payload = json.loads(row.payload_json)
-        part_number = payload.get("part_number")
-        origin = payload.get("origin")
-        if part_number and origin:
-            origins.setdefault(part_number, set()).add(origin)
-    return origins
 
 
 def _raise_for_preview_errors(label: str, batch: UploadBatch) -> None:

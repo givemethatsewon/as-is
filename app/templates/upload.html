@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">파일 업로드</p>
     <h1>엑셀 파일 넣기</h1>
-    <p class="supporting-copy">수입 Stock 엑셀과 수출 엑셀만 올립니다.</p>
+    <p class="supporting-copy">`수입 문서.xlsx`와 `수출 문서.xlsx` header를 그대로 읽습니다.</p>
   </div>
 </section>
 
@@ -15,8 +15,8 @@
 <form class="direct-match-form" action="/upload/match" method="post" enctype="multipart/form-data">
 <section class="split" id="upload-forms">
   <section class="panel">
-    <h2>1. 수입 Stock 엑셀</h2>
-    <p class="muted">원상태진행 시트가 있는 파일을 넣습니다.</p>
+    <h2>1. 수입 문서</h2>
+    <p class="muted">`수입신고번호`부터 `수량단위_1`까지 source column을 사용합니다.</p>
     <label class="file-picker">
       <input class="file-picker-input" type="file" name="import_file" accept=".csv,.xlsx,.xlsm" required>
       <span class="file-picker-button">파일 선택</span>
@@ -25,8 +25,8 @@
   </section>
 
   <section class="panel">
-    <h2>2. 수출 엑셀</h2>
-    <p class="muted">수출 또는 수출 양식 시트가 있는 파일을 넣습니다.</p>
+    <h2>2. 수출 문서</h2>
+    <p class="muted">`수출신고번호`부터 `수량단위_1`까지 source column을 사용합니다.</p>
     <label class="file-picker">
       <input class="file-picker-input" type="file" name="export_file" accept=".csv,.xlsx,.xlsm" required>
       <span class="file-picker-button">파일 선택</span>
@@ -36,7 +36,7 @@
 </section>
   <div class="direct-match-actions">
     <button class="button primary" type="submit">두 파일로 바로 매칭 실행</button>
-    <p class="muted">두 파일을 확인해 저장한 뒤 FIFO 매칭 결과를 바로 보여줍니다.</p>
+    <p class="muted">Part Number(`규격1`) equality만 적용하고 `신고일자` FIFO로 차감합니다.</p>
   </div>
 </form>
 {% endblock %}

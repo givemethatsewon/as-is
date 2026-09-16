@@ -7,17 +7,16 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23101615'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-size='12' font-family='Arial' font-weight='700' fill='white'%3EAS%3C/text%3E%3C/svg%3E">
     <title>{% block title %}As-Is{% endblock %}</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0">
-    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260916-1">
-    <script src="{{ url_for('static', path='/app.js') }}?v=20260916-1" defer></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260916-2">
+    <script src="{{ url_for('static', path='/app.js') }}?v=20260916-2" defer></script>
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/"><span class="brand-mark">AS</span><span><strong>원상태 수출 관리</strong><small>수입 재고 · 수출 FIFO 매칭</small></span></a>
+      <a class="brand" href="/"><span class="brand-mark">AS</span><span><strong>원상태 수출 관리</strong><small>Part Number · FIFO</small></span></a>
       <nav class="nav" aria-label="주요 메뉴">
         <a class="{{ 'active' if active == 'workbench' else '' }}" href="/">워크벤치</a>
         <a class="{{ 'active' if active == 'inventory' else '' }}" href="/inventory">수입 재고</a>
         <a class="{{ 'active' if active == 'history' else '' }}" href="/history">처리 이력</a>
-        <a class="{{ 'active' if active == 'settings' else '' }}" href="/settings">설정</a>
       </nav>
       <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ request.session.get('csrf_token', '') }}"><button class="quiet-button" type="submit">로그아웃</button></form>
     </header>
