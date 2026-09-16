@@ -25,38 +25,52 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
+    migrate_sqlite_schema(engine)
+
+
+def migrate_sqlite_schema(bind) -> None:
     from app import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    _ensure_upload_batch_columns()
-    _ensure_batch_owner_columns()
+    Base.metadata.create_all(bind=bind)
+    _ensure_upload_batch_columns(bind)
+    _ensure_batch_owner_columns(bind)
 
 
-def _ensure_upload_batch_columns() -> None:
-    if not DATABASE_URL.startswith("sqlite"):
+def _ensure_upload_batch_columns(bind) -> None:
+    if bind.dialect.name != "sqlite":
         return
 
-    inspector = inspect(engine)
+    inspector = inspect(bind)
     existing = {column["name"] for column in inspector.get_columns("upload_batches")}
     columns = {
         "column_mapping_json": "TEXT",
         "invalidated_at": "DATETIME",
         "invalidated_reason": "VARCHAR(255)",
+        "source_path": "VARCHAR(500)",
+        "source_sha256": "VARCHAR(64)",
+        "source_size_bytes": "INTEGER",
+        "status": "VARCHAR(30) NOT NULL DEFAULT 'review_ready'",
+        "processed_rows": "INTEGER NOT NULL DEFAULT 0",
+        "eligibility_days": "INTEGER NOT NULL DEFAULT 720",
+        "inventory_fingerprint": "VARCHAR(64)",
+        "error_message": "TEXT",
+        "result_path": "VARCHAR(500)",
+        "reverted_at": "DATETIME",
     }
     missing = [(name, column_type) for name, column_type in columns.items() if name not in existing]
     if not missing:
         return
 
-    with engine.begin() as connection:
+    with bind.begin() as connection:
         for name, column_type in missing:
             connection.execute(text(f"ALTER TABLE upload_batches ADD COLUMN {name} {column_type}"))
 
 
-def _ensure_batch_owner_columns() -> None:
-    if not DATABASE_URL.startswith("sqlite"):
+def _ensure_batch_owner_columns(bind) -> None:
+    if bind.dialect.name != "sqlite":
         return
 
-    inspector = inspect(engine)
+    inspector = inspect(bind)
     table_columns = {
         "import_lots": {"upload_batch_id": "VARCHAR(36)"},
         "export_requirements": {
@@ -65,7 +79,7 @@ def _ensure_batch_owner_columns() -> None:
             "seq_no": "VARCHAR(40)",
         },
     }
-    with engine.begin() as connection:
+    with bind.begin() as connection:
         for table_name, columns in table_columns.items():
             existing = {column["name"] for column in inspector.get_columns(table_name)}
             for name, column_type in columns.items():

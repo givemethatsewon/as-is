@@ -99,6 +99,15 @@ class UploadBatch(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     upload_type: Mapped[str] = mapped_column(String(20), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_path: Mapped[str | None] = mapped_column(String(500))
+    source_sha256: Mapped[str | None] = mapped_column(String(64))
+    source_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="review_ready", index=True)
+    processed_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    eligibility_days: Mapped[int] = mapped_column(Integer, nullable=False, default=720)
+    inventory_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    result_path: Mapped[str | None] = mapped_column(String(500))
     total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -106,11 +115,16 @@ class UploadBatch(Base):
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     column_mapping_json: Mapped[str | None] = mapped_column(Text)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     invalidated_reason: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
 
     rows: Mapped[list[UploadPreviewRow]] = relationship(back_populates="batch", cascade="all, delete-orphan")
+    jobs: Mapped[list[ProcessingJob]] = relationship(back_populates="batch", cascade="all, delete-orphan")
+    planned_allocations: Mapped[list[PlannedAllocation]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
 
 
 class UploadPreviewRow(Base):
@@ -125,3 +139,49 @@ class UploadPreviewRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
 
     batch: Mapped[UploadBatch] = relationship(back_populates="rows")
+    planned_allocations: Mapped[list[PlannedAllocation]] = relationship(
+        back_populates="preview_row", cascade="all, delete-orphan"
+    )
+
+
+class ProcessingJob(Base):
+    __tablename__ = "processing_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    batch_id: Mapped[str] = mapped_column(String(36), ForeignKey("upload_batches.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued", index=True)
+    processed_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    batch: Mapped[UploadBatch] = relationship(back_populates="jobs")
+
+
+class PlannedAllocation(Base):
+    __tablename__ = "planned_allocations"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "preview_row_id", "sequence", name="uq_planned_allocation_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    batch_id: Mapped[str] = mapped_column(String(36), ForeignKey("upload_batches.id"), nullable=False, index=True)
+    preview_row_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("upload_preview_rows.id"), nullable=False, index=True
+    )
+    import_lot_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("import_lots.id"), index=True)
+    export_requirement_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("export_requirements.id"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    remaining_qty_after: Mapped[int | None] = mapped_column(Integer)
+    shortage_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    hs_code: Mapped[str | None] = mapped_column(String(20))
+    spec: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+    batch: Mapped[UploadBatch] = relationship(back_populates="planned_allocations")
+    preview_row: Mapped[UploadPreviewRow] = relationship(back_populates="planned_allocations")
