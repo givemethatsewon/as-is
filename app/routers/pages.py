@@ -215,7 +215,8 @@ def upload_page(request: Request, message: str | None = None):
     return templates.TemplateResponse(request, "upload.html", {"active": "upload", "message": message})
 
 
-@router.post("/upload/match")
+@router.post("/upload/run")
+@router.post("/upload/match", include_in_schema=False)
 async def upload_and_match_page(
     request: Request,
     import_file: UploadFile = File(...),
