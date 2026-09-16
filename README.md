@@ -38,7 +38,11 @@ python -c 'from app.auth import hash_password; print(hash_password("원하는-�
 openssl rand -hex 32
 ```
 
-출력값으로 `.env`의 `APP_PASSWORD_HASH`, `SESSION_SECRET`을 교체한 뒤 실행합니다.
+출력값으로 `.env`의 `APP_PASSWORD_HASH`, `SESSION_SECRET`을 교체한 뒤 실행합니다. PBKDF2 hash에는 `$`가 들어가므로 Compose가 재해석하지 않도록 hash 전체를 single quote로 감싸야 합니다.
+
+```dotenv
+APP_PASSWORD_HASH='pbkdf2_sha256$...$...$...'
+```
 
 ```bash
 uv venv --python 3.12
