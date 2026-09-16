@@ -356,7 +356,7 @@ def test_upload_page_explains_video_style_excel_files(client):
     assert "수입신고번호" in response.text
     assert "수출신고번호" in response.text
     assert "수량단위_1" in response.text
-    assert 'action="/upload/run"' in response.text
+    assert 'action="/upload"' in response.text
     assert "두 파일로 바로 매칭 실행" in response.text
     assert "전체" not in response.text
     assert "신규" not in response.text
@@ -374,7 +374,7 @@ def test_upload_page_can_upload_two_files_and_run_matching_immediately(client):
     )
 
     response = client.post(
-        "/upload/run",
+        "/upload",
         files={
             "import_file": ("imports.csv", import_csv, "text/csv"),
             "export_file": ("exports.csv", export_csv, "text/csv"),
@@ -403,7 +403,7 @@ def test_direct_matching_accepts_korean_declaration_workbooks_columns(client):
     export_sheet.append(["4397824100011X", "20240319", "IN", "8708309000", "001", "01", "IN58330A0000", "WHEEL CYLINDER", 10, "EA"])
 
     response = client.post(
-        "/upload/run",
+        "/upload",
         files={
             "import_file": ("수입 문서.xlsx", _workbook_bytes(import_workbook), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
             "export_file": ("수출 문서.xlsx", _workbook_bytes(export_workbook), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
