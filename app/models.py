@@ -185,3 +185,11 @@ class PlannedAllocation(Base):
 
     batch: Mapped[UploadBatch] = relationship(back_populates="planned_allocations")
     preview_row: Mapped[UploadPreviewRow] = relationship(back_populates="planned_allocations")
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)

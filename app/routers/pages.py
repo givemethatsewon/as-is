@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from datetime import date
 from urllib.parse import urlencode
 
@@ -9,6 +10,15 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import (
+    auth_config,
+    clear_login_failures,
+    client_key,
+    csrf_token,
+    login_is_throttled,
+    record_login_failure,
+    verify_password,
+)
 from app.db import get_db
 from app.models import ExportRequirement, UploadBatch
 from app.services.matching import run_matching, undo_export_matching
@@ -21,9 +31,91 @@ from app.services.uploads import (
     preview_exports,
     preview_imports,
 )
+from app.services.settings import get_eligibility_days, set_eligibility_days
 from app.templating import templates
 
 router = APIRouter()
+
+
+@router.get("/login")
+def login_page(request: Request, next: str = "/"):
+    if request.session.get("authenticated"):
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"csrf_token": csrf_token(request), "next": next, "error": None},
+    )
+
+
+@router.post("/login")
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    csrf_token_value: str = Form(..., alias="csrf_token"),
+    next: str = Form("/"),
+):
+    token = csrf_token(request)
+    if not secrets.compare_digest(csrf_token_value, token):
+        raise HTTPException(status_code=403, detail="CSRF token validation failed.")
+    key = client_key(request)
+    if login_is_throttled(key):
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"csrf_token": token, "next": next, "error": "로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요."},
+            status_code=429,
+        )
+    config = auth_config()
+    if not config.configured:
+        raise HTTPException(status_code=503, detail="공용 계정이 아직 설정되지 않았습니다.")
+    if username != config.username or not verify_password(password, config.password_hash):
+        record_login_failure(key)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"csrf_token": token, "next": next, "error": "아이디 또는 비밀번호가 올바르지 않습니다."},
+            status_code=401,
+        )
+    clear_login_failures(key)
+    request.session.clear()
+    request.session.update({"authenticated": True, "username": config.username, "csrf_token": token})
+    destination = next if next.startswith("/") and not next.startswith("//") else "/"
+    return RedirectResponse(url=destination, status_code=303)
+
+
+@router.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)
+
+
+@router.get("/settings")
+def settings_page(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {"active": "settings", "eligibility_days": get_eligibility_days(db), "message": None},
+    )
+
+
+@router.post("/settings")
+def update_settings_page(request: Request, eligibility_days: int = Form(...), db: Session = Depends(get_db)):
+    try:
+        set_eligibility_days(db, eligibility_days)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {"active": "settings", "eligibility_days": eligibility_days, "error": str(exc)},
+            status_code=400,
+        )
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {"active": "settings", "eligibility_days": eligibility_days, "message": "설정을 저장했습니다."},
+    )
 
 
 @router.get("/")
