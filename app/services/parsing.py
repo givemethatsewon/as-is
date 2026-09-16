@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO, StringIO
+import csv
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from fastapi import UploadFile
+from openpyxl import load_workbook
 
 
 class ParseError(ValueError):
@@ -74,13 +77,83 @@ async def read_upload_rows(file: UploadFile, upload_type: str | None = None) -> 
     if filename.lower().endswith(".csv"):
         text = content.decode("utf-8-sig")
         frame = pd.read_csv(StringIO(text), dtype=str).fillna("")
-    elif filename.lower().endswith((".xlsx", ".xls", ".xlsm")):
+    elif filename.lower().endswith((".xlsx", ".xlsm")):
         frame = _read_excel_table(content, upload_type)
     else:
         raise ParseError("Only CSV, XLSX, and XLSM files are supported.")
 
     frame.columns = [str(column).strip() for column in frame.columns]
     return frame.to_dict(orient="records")
+
+
+def iter_file_rows(path: str | Path, upload_type: str | None = None):
+    """Yield data rows without loading the entire workbook into memory."""
+    source = Path(path)
+    suffix = source.suffix.lower()
+    if suffix == ".csv":
+        with source.open("r", encoding="utf-8-sig", newline="") as stream:
+            yield from csv.DictReader(stream)
+        return
+    if suffix not in {".xlsx", ".xlsm"}:
+        raise ParseError("Only CSV, XLSX, and XLSM files are supported.")
+
+    workbook = load_workbook(source, read_only=True, data_only=True, keep_vba=False, keep_links=False)
+    try:
+        sheet, header_index, sampled_rows = _select_streaming_sheet(workbook, upload_type)
+        headers, data_offset = _streaming_headers(sampled_rows, header_index)
+        keep = [(index, header) for index, header in enumerate(headers) if header]
+        for values in sheet.iter_rows(min_row=data_offset + 1, values_only=True):
+            row = {header: values[index] if index < len(values) else None for index, header in keep}
+            if any(value not in (None, "") for value in row.values()):
+                yield row
+    finally:
+        workbook.close()
+
+
+def _select_streaming_sheet(workbook, upload_type: str | None):
+    candidates = []
+    hints = HEADER_HINTS.get(upload_type or "", HEADER_HINTS["imports"] + HEADER_HINTS["exports"])
+    for sheet_index, sheet in enumerate(workbook.worksheets):
+        sampled = [list(row) for row in sheet.iter_rows(min_row=1, max_row=20, values_only=True)]
+        if not sampled:
+            continue
+        best_header = 0
+        best_score = -1
+        for index, values in enumerate(sampled):
+            cells = [_normalize_header(value) for value in values]
+            score = sum(_cell_matches_any_hint(cell, hints) for cell in cells if cell)
+            if score > best_score:
+                best_header = index
+                best_score = score
+        candidates.append((_sheet_score(sheet.title, upload_type) + best_score, -sheet_index, sheet, best_header, sampled))
+    if not candidates:
+        raise ParseError("Excel file has no readable rows.")
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    _, _, sheet, header_index, sampled = candidates[0]
+    return sheet, header_index, sampled
+
+
+def _streaming_headers(rows: list[list[Any]], header_index: int) -> tuple[list[str], int]:
+    primary = [_clean_header(value) for value in rows[header_index]]
+    if header_index + 1 >= len(rows):
+        return [_dedupe_header(header, primary[:index]) for index, header in enumerate(primary)], header_index + 1
+    secondary = [_clean_header(value) for value in rows[header_index + 1]]
+    if not _looks_like_subheader_row(secondary):
+        return primary, header_index + 1
+    headers = []
+    last_primary = ""
+    for main, sub in zip(primary, secondary, strict=False):
+        if main:
+            last_primary = main
+        if main and sub:
+            headers.append(f"{main} {sub}")
+        elif main:
+            headers.append(main)
+        elif sub:
+            headers.append(sub if not last_primary else sub)
+        else:
+            headers.append("")
+    return [_dedupe_header(header, headers[:index]) for index, header in enumerate(headers)], header_index + 2
 
 
 def _read_excel_table(content: bytes, upload_type: str | None) -> pd.DataFrame:
