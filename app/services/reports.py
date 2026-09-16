@@ -6,6 +6,7 @@ from io import BytesIO, StringIO
 from typing import Any
 
 import pandas as pd
+from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from sqlalchemy import func, select
@@ -283,6 +284,189 @@ def video_style_export_result_xlsx(db: Session) -> bytes:
         _style_report_sheet(writer.sheets["수출 결과"])
     output.seek(0)
     return output.read()
+
+
+def matching_run_workbook(db: Session, batch_id: str) -> bytes:
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None or batch.upload_type != "exports":
+        raise ValueError("수출 매칭 파일을 찾을 수 없습니다.")
+    if batch.confirmed_at is None:
+        raise ValueError("확정한 수출 매칭 파일만 다운로드할 수 있습니다.")
+
+    workbook = Workbook()
+    result_sheet = workbook.active
+    result_sheet.title = "수출 결과"
+    result_headers = [
+        "Order No",
+        "Seq No",
+        "Part Number",
+        "Description",
+        "U/Price",
+        "Ready to Ship Qty",
+        "Amount",
+        "수출 원산지",
+        "매칭 상태",
+        "수입신고번호",
+        "수리일",
+        "원산지",
+        "세번",
+        "수입 란번호",
+        "수입 행번호",
+        "수입 규격",
+        "매칭 수량",
+        "매칭 후 잔량",
+        "부족 수량",
+    ]
+    result_sheet.append(result_headers)
+
+    requirements = list(
+        db.scalars(
+            select(ExportRequirement)
+            .where(ExportRequirement.upload_batch_id == batch.id)
+            .order_by(ExportRequirement.created_at, ExportRequirement.id)
+        )
+    )
+    for export in requirements:
+        allocations = sorted(
+            export.allocations,
+            key=lambda allocation: (
+                allocation.import_lot.import_accepted_date,
+                allocation.import_lot.import_declaration_no,
+                allocation.import_lot.line_no,
+                allocation.import_lot.row_no,
+            ),
+        )
+        for allocation in allocations:
+            lot = allocation.import_lot
+            result_sheet.append(
+                _matching_result_values(
+                    export,
+                    status=export.status,
+                    declaration=lot.import_declaration_no,
+                    accepted_date=lot.import_accepted_date.isoformat(),
+                    import_origin=lot.origin,
+                    hs_code=lot.hs_code,
+                    line_no=lot.line_no,
+                    row_no=lot.row_no,
+                    import_spec=lot.spec,
+                    matched_qty=allocation.matched_qty,
+                    remaining_qty_after=allocation.remaining_qty_after,
+                    shortage_qty=0,
+                )
+            )
+
+        matched_qty = sum(allocation.matched_qty for allocation in allocations)
+        shortage_qty = max(export.required_qty - matched_qty, 0)
+        if shortage_qty:
+            result_sheet.append(
+                _matching_result_values(
+                    export,
+                    status="NO MATCH",
+                    declaration="NO MATCH",
+                    accepted_date=None,
+                    import_origin=None,
+                    hs_code=None,
+                    line_no=None,
+                    row_no=None,
+                    import_spec=None,
+                    matched_qty=0,
+                    remaining_qty_after=None,
+                    shortage_qty=shortage_qty,
+                )
+            )
+
+    inventory_sheet = workbook.create_sheet("원상태잔량")
+    inventory_headers = [
+        "수입신고번호",
+        "수리일",
+        "원산지",
+        "세번",
+        "란번호",
+        "행번호",
+        "Part Number",
+        "규격",
+        "수입 수량",
+        "사용 수량",
+        "잔량",
+        "수량단위",
+        "상태",
+    ]
+    inventory_sheet.append(inventory_headers)
+    lots = list(
+        db.scalars(
+            select(ImportLot)
+            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+            .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+            .order_by(
+                ImportLot.import_accepted_date,
+                ImportLot.import_declaration_no,
+                ImportLot.line_no,
+                ImportLot.row_no,
+            )
+        )
+    )
+    for lot in lots:
+        inventory_sheet.append(
+            [
+                lot.import_declaration_no,
+                lot.import_accepted_date.isoformat(),
+                lot.origin,
+                lot.hs_code,
+                lot.line_no,
+                lot.row_no,
+                lot.part_number,
+                lot.spec,
+                lot.import_qty,
+                lot.used_qty,
+                lot.remaining_qty,
+                lot.qty_unit,
+                STATUS_LABELS.get(lot.status, lot.status),
+            ]
+        )
+
+    _style_report_sheet(result_sheet)
+    _style_report_sheet(inventory_sheet)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _matching_result_values(
+    export: ExportRequirement,
+    *,
+    status: str,
+    declaration: str,
+    accepted_date: str | None,
+    import_origin: str | None,
+    hs_code: str | None,
+    line_no: str | None,
+    row_no: str | None,
+    import_spec: str | None,
+    matched_qty: int,
+    remaining_qty_after: int | None,
+    shortage_qty: int,
+) -> list[Any]:
+    return [
+        export.order_no,
+        export.seq_no,
+        export.part_number,
+        export.description,
+        float(export.unit_price) if export.unit_price is not None else None,
+        export.required_qty,
+        float(export.amount) if export.amount is not None else None,
+        export.origin,
+        STATUS_LABELS.get(status, status),
+        declaration,
+        accepted_date,
+        import_origin,
+        hs_code,
+        line_no,
+        row_no,
+        import_spec,
+        matched_qty,
+        remaining_qty_after,
+        shortage_qty,
+    ]
 
 
 def contest_example_report_xlsx(db: Session) -> bytes:

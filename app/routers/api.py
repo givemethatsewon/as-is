@@ -6,6 +6,8 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
+from fastapi.responses import FileResponse
+from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,7 +18,13 @@ from app.services.matching import run_matching, undo_export_matching
 from app.services.parsing import ParseError, read_upload_rows
 from app.services.file_storage import UploadTooLargeError, store_upload
 from app.services.jobs import enqueue_upload_job, submit_upload_preview_job
-from app.services.reports import allocation_rows, contest_example_report_xlsx, refund_report_xlsx, rows_to_csv
+from app.services.reports import (
+    allocation_rows,
+    contest_example_report_xlsx,
+    matching_run_workbook,
+    refund_report_xlsx,
+    rows_to_csv,
+)
 from app.services.summaries import inventory_summary
 from app.services.settings import get_eligibility_days
 from app.services.uploads import (
@@ -135,6 +143,17 @@ def api_upload_batch_rows(
     }
 
 
+@router.get("/upload-batches/{batch_id}/original")
+def api_download_original_upload(batch_id: str, db: Session = Depends(get_db)):
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None or not batch.source_path:
+        raise HTTPException(status_code=404, detail="원본 파일을 찾을 수 없습니다.")
+    source = Path(batch.source_path)
+    if not source.is_file():
+        raise HTTPException(status_code=404, detail="보관된 원본 파일이 없습니다.")
+    return FileResponse(source, filename=batch.filename, media_type="application/octet-stream")
+
+
 @router.post("/import-batches/{batch_id}/confirm")
 def api_confirm_import_batch(batch_id: str, db: Session = Depends(get_db)):
     return _confirm(batch_id, "imports", db)
@@ -154,6 +173,19 @@ def api_revert_match_run(batch_id: str, db: Session = Depends(get_db)):
         return revert_match_run(db, batch_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/match-runs/{batch_id}/result.xlsx")
+def api_download_match_run_result(batch_id: str, db: Session = Depends(get_db)):
+    try:
+        content = matching_run_workbook(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="matching-result-{batch_id}.xlsx"'},
+    )
 
 
 @router.post("/imports/preview", response_model=UploadPreviewResponse)
