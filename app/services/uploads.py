@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
@@ -10,7 +11,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ExportAllocation, ExportRequirement, ImportLot, UploadBatch, UploadPreviewRow, now_utc
+from app.models import (
+    ExportAllocation,
+    ExportRequirement,
+    ImportLot,
+    PlannedAllocation,
+    UploadBatch,
+    UploadPreviewRow,
+    now_utc,
+)
+from app.services.allocation_plans import clean_part_number, plan_export_rows
 from app.services.matching import update_lot_status
 from app.services.parsing import clean_text, optional_text, parse_date, parse_decimal, parse_non_negative_int, parse_positive_int
 
@@ -216,7 +226,7 @@ def normalize_import_row(row: dict[str, Any]) -> dict[str, Any]:
         "hs_code": clean_text(row.get("hs_code")),
         "line_no": clean_text(row.get("line_no")),
         "row_no": clean_text(row.get("row_no")),
-        "part_number": clean_text(row.get("part_number")).upper(),
+        "part_number": clean_part_number(row.get("part_number")),
         "spec": optional_text(row.get("spec")),
         "import_qty": import_qty,
         "remaining_qty": remaining_qty,
@@ -235,7 +245,7 @@ def normalize_export_row(row: dict[str, Any]) -> dict[str, Any]:
         "order_no": optional_text(row.get("order_no")),
         "seq_no": optional_text(row.get("seq_no")),
         "origin": clean_text(row.get("origin")).upper(),
-        "part_number": clean_text(row.get("part_number")).upper(),
+        "part_number": clean_part_number(row.get("part_number")),
         "hs_code": optional_text(row.get("hs_code")),
         "required_qty": required_qty,
         "description": optional_text(row.get("description")),
@@ -330,16 +340,20 @@ def _payload_import_values(payload: dict[str, Any]) -> tuple[str, str, str | Non
     )
 
 
-def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> PreviewResult:
+def preview_imports(
+    db: Session,
+    rows: list[dict[str, Any]],
+    filename: str,
+    *,
+    batch: UploadBatch | None = None,
+) -> PreviewResult:
     rows, column_mapping = normalize_import_columns(rows)
-    batch = UploadBatch(
-        upload_type="imports",
-        filename=filename,
-        total_rows=len(rows),
-        column_mapping_json=json.dumps(column_mapping, ensure_ascii=False),
-    )
-    db.add(batch)
-    db.flush()
+    if batch is None:
+        batch = UploadBatch(upload_type="imports", filename=filename)
+        db.add(batch)
+        db.flush()
+    batch.total_rows = len(rows)
+    batch.column_mapping_json = json.dumps(column_mapping, ensure_ascii=False)
     statuses: Counter[str] = Counter()
     seen_payloads: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 
@@ -371,6 +385,8 @@ def preview_imports(db: Session, rows: list[dict[str, Any]], filename: str) -> P
         )
 
     _apply_status_counts(batch, statuses)
+    batch.processed_rows = len(rows)
+    batch.status = "review_ready"
     db.commit()
     db.refresh(batch)
     return PreviewResult(batch=batch, warnings=[], column_mapping=column_mapping)
@@ -381,16 +397,16 @@ def preview_exports(
     rows: list[dict[str, Any]],
     filename: str,
     additional_origins: dict[str, set[str]] | None = None,
+    *,
+    batch: UploadBatch | None = None,
 ) -> PreviewResult:
     rows, column_mapping = normalize_export_columns(rows)
-    batch = UploadBatch(
-        upload_type="exports",
-        filename=filename,
-        total_rows=len(rows),
-        column_mapping_json=json.dumps(column_mapping, ensure_ascii=False),
-    )
-    db.add(batch)
-    db.flush()
+    if batch is None:
+        batch = UploadBatch(upload_type="exports", filename=filename)
+        db.add(batch)
+        db.flush()
+    batch.total_rows = len(rows)
+    batch.column_mapping_json = json.dumps(column_mapping, ensure_ascii=False)
     statuses: Counter[str] = Counter()
 
     for index, row in enumerate(rows, start=2):
@@ -419,6 +435,8 @@ def preview_exports(
         )
 
     _apply_status_counts(batch, statuses)
+    batch.processed_rows = len(rows)
+    batch.status = "review_ready"
     db.commit()
     db.refresh(batch)
     return PreviewResult(batch=batch, warnings=[], column_mapping=column_mapping)
@@ -464,6 +482,8 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
         raise ValueError("이미 저장한 파일입니다.")
     if batch.invalidated_at is not None:
         raise ValueError("무효 처리된 파일은 저장할 수 없습니다.")
+    if batch.upload_type == "imports" and (batch.conflict_count or batch.error_count):
+        raise ValueError("충돌(conflict) 또는 오류가 있는 수입 파일은 전체를 저장할 수 없습니다.")
 
     inserted_count = 0
     reactivated_count = 0
@@ -528,6 +548,234 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
         "reactivated_count": reactivated_count,
         "skipped_count": skipped_count,
         "error_count": error_count,
+    }
+
+
+def inventory_fingerprint(db: Session) -> str:
+    lots = list(
+        db.scalars(
+            select(ImportLot)
+            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+            .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+            .order_by(ImportLot.id)
+        )
+    )
+    state = [
+        (
+            lot.id,
+            lot.import_declaration_no,
+            lot.import_accepted_date.isoformat(),
+            lot.line_no,
+            lot.row_no,
+            clean_part_number(lot.part_number),
+            lot.origin,
+            lot.remaining_qty,
+            lot.used_qty,
+        )
+        for lot in lots
+    ]
+    return hashlib.sha256(json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def preview_export_run(
+    db: Session,
+    rows: list[dict[str, Any]],
+    filename: str,
+    *,
+    eligibility_days: int = 720,
+    batch: UploadBatch | None = None,
+) -> PreviewResult:
+    result = preview_exports(db, rows, filename, batch=batch)
+    batch = result.batch
+    batch.eligibility_days = eligibility_days
+    batch.status = "review_ready"
+    batch.inventory_fingerprint = inventory_fingerprint(db)
+
+    preview_rows = sorted(
+        (row for row in batch.rows if row.row_status == "new"),
+        key=lambda row: row.row_number,
+    )
+    export_adapters = []
+    for row in preview_rows:
+        payload = json.loads(row.payload_json)
+        export_adapters.append(
+            _PlanExportRow(
+                id=row.id,
+                part_number=payload["part_number"],
+                origin=payload["origin"],
+                export_date=parse_date(payload["export_date"], "export_date"),
+                required_qty=int(payload["required_qty"]),
+            )
+        )
+
+    lots = list(
+        db.scalars(
+            select(ImportLot)
+            .outerjoin(UploadBatch, ImportLot.upload_batch_id == UploadBatch.id)
+            .where((ImportLot.upload_batch_id.is_(None)) | (UploadBatch.invalidated_at.is_(None)))
+        )
+    )
+    plans = plan_export_rows(export_adapters, lots, eligibility_days)
+    for plan in plans:
+        sequence = 1
+        for allocation in plan.allocations:
+            db.add(
+                PlannedAllocation(
+                    batch_id=batch.id,
+                    preview_row_id=plan.export_id,
+                    import_lot_id=allocation.import_lot_id,
+                    sequence=sequence,
+                    matched_qty=allocation.quantity,
+                    remaining_qty_after=allocation.remaining_qty_after,
+                    shortage_qty=0,
+                    hs_code=allocation.hs_code,
+                    spec=allocation.spec,
+                )
+            )
+            sequence += 1
+        if plan.shortage_qty:
+            db.add(
+                PlannedAllocation(
+                    batch_id=batch.id,
+                    preview_row_id=plan.export_id,
+                    import_lot_id=None,
+                    sequence=sequence,
+                    matched_qty=0,
+                    remaining_qty_after=None,
+                    shortage_qty=plan.shortage_qty,
+                )
+            )
+    db.commit()
+    db.refresh(batch)
+    return result
+
+
+@dataclass(frozen=True)
+class _PlanExportRow:
+    id: str
+    part_number: str
+    origin: str
+    export_date: object
+    required_qty: int
+
+
+def confirm_match_run(db: Session, batch_id: str) -> dict[str, int | str]:
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None or batch.upload_type != "exports":
+        raise ValueError("수출 매칭 파일을 찾을 수 없습니다.")
+    if batch.confirmed_at is not None:
+        raise ValueError("이미 확정한 수출 매칭 파일입니다.")
+    if batch.reverted_at is not None:
+        raise ValueError("되돌린 수출 매칭 파일은 다시 확정할 수 없습니다.")
+    if batch.error_count:
+        raise ValueError("오류가 있는 수출 파일은 확정할 수 없습니다.")
+    if batch.inventory_fingerprint != inventory_fingerprint(db):
+        raise ValueError("미리보기 이후 재고가 변경되었습니다. 파일을 다시 검토해 주세요.")
+
+    allocation_count = 0
+    shortage_count = 0
+    export_count = 0
+    try:
+        for preview_row in sorted(batch.rows, key=lambda row: row.row_number):
+            if preview_row.row_status != "new":
+                continue
+            payload = json.loads(preview_row.payload_json)
+            plans = sorted(preview_row.planned_allocations, key=lambda plan: plan.sequence)
+            matched_total = sum(plan.matched_qty for plan in plans)
+            shortage_total = sum(plan.shortage_qty for plan in plans)
+            requirement = ExportRequirement(
+                export_date=parse_date(payload["export_date"], "export_date"),
+                order_no=payload.get("order_no"),
+                seq_no=payload.get("seq_no"),
+                origin=payload["origin"],
+                part_number=payload["part_number"],
+                hs_code=payload.get("hs_code"),
+                description=payload.get("description"),
+                unit_price=parse_decimal(payload.get("unit_price"), "unit_price"),
+                required_qty=payload["required_qty"],
+                amount=parse_decimal(payload.get("amount"), "amount"),
+                status="matched" if not shortage_total else "partial_matched" if matched_total else "insufficient_stock",
+                upload_batch_id=batch.id,
+            )
+            db.add(requirement)
+            db.flush()
+            export_count += 1
+
+            for plan in plans:
+                plan.export_requirement_id = requirement.id
+                if plan.shortage_qty:
+                    shortage_count += 1
+                    continue
+                lot = db.get(ImportLot, plan.import_lot_id)
+                if lot is None or lot.remaining_qty < plan.matched_qty:
+                    raise ValueError("확정 중 재고가 변경되었습니다. 파일을 다시 검토해 주세요.")
+                lot.remaining_qty -= plan.matched_qty
+                lot.used_qty += plan.matched_qty
+                update_lot_status(lot, requirement.export_date)
+                expected_refund = (
+                    lot.duty_per_unit * plan.matched_qty if lot.duty_per_unit is not None else None
+                )
+                db.add(
+                    ExportAllocation(
+                        export_requirement_id=requirement.id,
+                        import_lot_id=lot.id,
+                        matched_qty=plan.matched_qty,
+                        remaining_qty_after=lot.remaining_qty,
+                        expected_refund_amount=expected_refund,
+                        match_status=requirement.status,
+                    )
+                )
+                allocation_count += 1
+
+        batch.confirmed_at = now_utc()
+        batch.status = "confirmed"
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "batch_id": batch.id,
+        "export_count": export_count,
+        "allocation_count": allocation_count,
+        "shortage_count": shortage_count,
+    }
+
+
+def revert_match_run(db: Session, batch_id: str) -> dict[str, int | str]:
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None or batch.upload_type != "exports":
+        raise ValueError("수출 매칭 파일을 찾을 수 없습니다.")
+    if batch.confirmed_at is None:
+        raise ValueError("아직 확정하지 않은 수출 매칭 파일입니다.")
+    if batch.reverted_at is not None:
+        raise ValueError("이미 되돌린 수출 매칭 파일입니다.")
+
+    requirements = list(
+        db.scalars(select(ExportRequirement).where(ExportRequirement.upload_batch_id == batch.id))
+    )
+    restored_qty = 0
+    allocation_count = 0
+    try:
+        for requirement in requirements:
+            for allocation in requirement.allocations:
+                lot = allocation.import_lot
+                lot.remaining_qty += allocation.matched_qty
+                lot.used_qty = max(0, lot.used_qty - allocation.matched_qty)
+                update_lot_status(lot, requirement.export_date)
+                restored_qty += allocation.matched_qty
+                allocation_count += 1
+            requirement.status = "reverted"
+        batch.reverted_at = now_utc()
+        batch.status = "reverted"
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "batch_id": batch.id,
+        "restored_qty": restored_qty,
+        "allocation_count": allocation_count,
     }
 
 

@@ -1,22 +1,157 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ExportRequirement, UploadBatch
+from app.models import ExportRequirement, ProcessingJob, UploadBatch, UploadPreviewRow
 from app.schemas import MatchingRunResponse, UploadConfirmResponse, UploadPreviewResponse
 from app.services.matching import run_matching, undo_export_matching
 from app.services.parsing import ParseError, read_upload_rows
+from app.services.file_storage import UploadTooLargeError, store_upload
+from app.services.jobs import enqueue_upload_job, submit_upload_preview_job
 from app.services.reports import allocation_rows, contest_example_report_xlsx, refund_report_xlsx, rows_to_csv
 from app.services.summaries import inventory_summary
-from app.services.uploads import confirm_batch, preview_exports, preview_imports
+from app.services.uploads import (
+    confirm_batch,
+    confirm_match_run,
+    preview_exports,
+    preview_imports,
+    revert_match_run,
+)
 
 router = APIRouter(prefix="/api")
+
+
+@router.post("/upload-batches/{upload_type}", status_code=status.HTTP_202_ACCEPTED)
+async def api_create_upload_batch(
+    upload_type: str,
+    file: UploadFile = File(...),
+    eligibility_days: int = Form(720),
+    db: Session = Depends(get_db),
+):
+    if upload_type not in {"imports", "exports"}:
+        raise HTTPException(status_code=404, detail="지원하지 않는 업로드 종류입니다.")
+    if eligibility_days < 0:
+        raise HTTPException(status_code=400, detail="매칭 기간은 0일 이상이어야 합니다.")
+    try:
+        stored = store_upload(file.file, file.filename or "upload")
+    except (ValueError, UploadTooLargeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    batch = UploadBatch(
+        upload_type=upload_type,
+        filename=file.filename or stored.safe_filename,
+        source_path=str(stored.path),
+        source_sha256=stored.sha256,
+        source_size_bytes=stored.size_bytes,
+        eligibility_days=eligibility_days,
+        status="queued",
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    job = enqueue_upload_job(db, batch.id)
+    submit_upload_preview_job(job.id)
+    return {"batch_id": batch.id, "job_id": job.id, "status": job.status}
+
+
+@router.get("/upload-batches/{batch_id}")
+def api_upload_batch_status(batch_id: str, db: Session = Depends(get_db)):
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="업로드 파일을 찾을 수 없습니다.")
+    job = db.scalar(
+        select(ProcessingJob).where(ProcessingJob.batch_id == batch.id).order_by(ProcessingJob.created_at.desc())
+    )
+    return {
+        "batch_id": batch.id,
+        "upload_type": batch.upload_type,
+        "filename": batch.filename,
+        "status": batch.status,
+        "processed_rows": batch.processed_rows,
+        "total_rows": batch.total_rows,
+        "new_count": batch.new_count,
+        "duplicate_count": batch.duplicate_count,
+        "conflict_count": batch.conflict_count,
+        "error_count": batch.error_count,
+        "error_message": batch.error_message,
+        "job_id": job.id if job else None,
+    }
+
+
+@router.get("/upload-batches/{batch_id}/rows")
+def api_upload_batch_rows(
+    batch_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    batch = db.get(UploadBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="업로드 파일을 찾을 수 없습니다.")
+    rows = list(
+        db.scalars(
+            select(UploadPreviewRow)
+            .where(UploadPreviewRow.batch_id == batch.id)
+            .order_by(UploadPreviewRow.row_number)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    )
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total_rows": batch.total_rows,
+        "rows": [
+            {
+                "id": row.id,
+                "row_number": row.row_number,
+                "status": row.row_status,
+                "message": row.message,
+                "payload": json.loads(row.payload_json),
+                "allocations": [
+                    {
+                        "sequence": plan.sequence,
+                        "import_lot_id": plan.import_lot_id,
+                        "matched_qty": plan.matched_qty,
+                        "remaining_qty_after": plan.remaining_qty_after,
+                        "shortage_qty": plan.shortage_qty,
+                        "hs_code": plan.hs_code,
+                        "spec": plan.spec,
+                    }
+                    for plan in sorted(row.planned_allocations, key=lambda plan: plan.sequence)
+                ],
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/import-batches/{batch_id}/confirm")
+def api_confirm_import_batch(batch_id: str, db: Session = Depends(get_db)):
+    return _confirm(batch_id, "imports", db)
+
+
+@router.post("/match-runs/{batch_id}/confirm")
+def api_confirm_match_run(batch_id: str, db: Session = Depends(get_db)):
+    try:
+        return confirm_match_run(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/match-runs/{batch_id}/revert")
+def api_revert_match_run(batch_id: str, db: Session = Depends(get_db)):
+    try:
+        return revert_match_run(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/imports/preview", response_model=UploadPreviewResponse)
