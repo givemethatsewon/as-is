@@ -623,6 +623,7 @@ def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
             inserted_count += 1
 
     batch.confirmed_at = now_utc()
+    batch.status = "confirmed"
     db.commit()
     return {
         "batch_id": batch.id,

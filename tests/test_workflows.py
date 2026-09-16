@@ -64,6 +64,7 @@ def test_import_exact_duplicate_is_skipped_and_conflict_blocks_whole_batch(db_se
 
     assert result["inserted_count"] == 0
     assert result["skipped_count"] == 1
+    assert duplicate.batch.status == "confirmed"
 
     conflict = preview_imports(
         db_session,
