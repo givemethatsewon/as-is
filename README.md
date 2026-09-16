@@ -1,165 +1,92 @@
 # As-Is
 
-관세사를 위한 원상태수출 재고 매칭 데모입니다. 수입 신고 자료와 수출 예정 자료를 업로드하면 품번, 원산지, 수입 수리일 기준으로 사용 가능한 수입 재고를 찾고 FIFO 방식으로 수출 건에 배정합니다.
+원상태수출 Excel 매크로를 대체하는 수입 재고·수출 FIFO 매칭 워크벤치입니다. 수입 재고를 누적하고, 수출 파일별 배정 결과를 검토한 뒤 명시적으로 확정하며, 결과 Excel과 원본 파일을 다시 받을 수 있습니다.
 
-This is a local-first FastAPI application for customs refund workflow prototyping. It helps customs brokers and trade operations teams review import inventory, export requirements, matching evidence, and report downloads before preparing an actual refund claim.
-
-## What It Does
-
-- Imports CSV/XLSX import-lot data into a local SQLite database.
-- Imports CSV/XLSX export requirement data.
-- Shows a preview before confirmed rows are saved.
-- Matches exports to import lots by same part number, same origin, import date within 360 days, remaining quantity, and FIFO order.
-- Keeps HS-code mismatch as a warning instead of blocking the match.
-- Excludes invalidated upload batches from dashboard, inventory, matching, and report totals.
-- Downloads allocation evidence and inventory summaries as CSV/XLSX reports.
-
-## Who It Is For
-
-As-Is is designed for:
-
-- customs brokers reviewing 원상태수출 refund evidence,
-- trade operations teams managing part-number based import/export inventory,
-- developers exploring compliance-oriented inventory matching workflows.
-
-It is not a customs filing system and does not submit data to UNI-PASS or any government service.
-
-## Current Workflow
+## 업무 흐름
 
 ```text
-Upload import lots
-  -> Preview and confirm rows
-  -> Upload export requirements
-  -> Preview and confirm rows
-  -> Run FIFO matching
-  -> Review inventory and allocation evidence
-  -> Download CSV/XLSX reports
+수입 Excel 업로드 → 신규/중복/충돌 검토 → 재고 누적 확정
+수출 Excel 업로드 → 백그라운드 배정 → 행별 FIFO 근거/부족 검토
+→ 파일 전체 확정 → 결과 Excel 다운로드 → 필요 시 파일 전체 되돌리기
 ```
 
-## Matching Rules
+- 정확히 같은 수입 로트는 건너뜁니다.
+- 같은 business key에 다른 값이 있으면 수입 파일 전체를 차단합니다.
+- 미리보기는 재고를 변경하지 않습니다.
+- 수출 확정과 파일 단위 되돌리기는 각각 하나의 SQLite transaction입니다.
+- 원본 `.xlsx`, `.xlsm`, `.csv`를 보관하며 VBA는 실행하지 않습니다.
 
-The current matcher uses:
+## 매칭 규칙
 
-- same part number,
-- same origin,
-- import accepted date before or on the export date,
-- import accepted date within 360 days of the export date,
-- remaining quantity greater than zero,
-- FIFO order by import accepted date, declaration number, line number, and row number.
+- Part Number에서 일반 공백, NBSP, tab, CR, LF를 제거한 뒤 대문자로 비교
+- 원산지 정확히 일치
+- `수입 수리일 <= 수출일`
+- 기본 720일 이내(양 끝 날짜 포함, 설정 화면에서 변경 가능)
+- 남은 수량이 0보다 큰 로트만 사용
+- 수리일 → 수입신고번호 → 란번호 → 행번호 순 FIFO
+- 여러 수입 로트로 분할 가능
+- 부족하면 가용 배정은 유지하고 `NO MATCH` 행 추가
+- HS, 규격, 단가, 금액은 매칭 key가 아니며 결과 증빙 값으로 보존
 
-If an export HS code differs from the matched import HS code, the allocation is still created with a warning. The warning is evidence for human review; it is not a final legal determination.
+## 실행 설정
 
-## Data And Security Boundary
-
-By default, data stays on the machine running the app:
-
-- The default database is `sqlite:///./as_is.db`.
-- The local demo binds to `127.0.0.1:8000`.
-- Docker Compose stores SQLite data in the `as_is_data` volume.
-
-Do not upload real customer data to a public demo instance. If you adapt this project for production use, add authentication, authorization, backup policy, audit logging, encryption-at-rest decisions, and a legal review of the matching policy.
-
-## Quick Start
-
-### macOS/Linux
+Python 3.12 이상이 필요합니다. 공용 계정은 환경변수 없이는 구성되지 않으며, 모든 비공개 route는 로그인 세션을 요구합니다.
 
 ```bash
-./start.sh
+cp .env.example .env
+python -c 'from app.auth import hash_password; print(hash_password("원하는-비밀번호"))'
+openssl rand -hex 32
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
-
-### Windows
-
-Double-click `start.bat`, then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
-
-The start scripts prefer `uv`. If `uv` is unavailable, they create a Python virtual environment and install the project with `pip`. Python 3.12 or newer is required.
-
-## Demo Data
-
-Use these files for a practical end-to-end demo:
-
-- `samples/practical_imports.csv`
-- `samples/practical_exports.csv`
-- `samples/practical_import_review_cases.csv`
-
-Suggested flow:
-
-1. Open `/upload`.
-2. Upload `samples/practical_imports.csv` as import data and confirm the preview.
-3. Upload `samples/practical_exports.csv` as export requirements and confirm the preview.
-4. Open `/exports` and run matching. Leave the date empty to process all pending export requirements.
-5. Open `/inventory` to review remaining import quantity.
-6. Open `/reports` to download allocation and inventory reports.
-
-To reset local demo data, stop the server and delete `as_is.db`.
-
-## Development
+출력값으로 `.env`의 `APP_PASSWORD_HASH`, `SESSION_SECRET`을 교체한 뒤 실행합니다.
 
 ```bash
 uv venv --python 3.12
 uv sync --extra test
-uv run uvicorn app.main:app --reload
+set -a && source .env && set +a
+UPLOAD_DIR=./data/uploads COOKIE_SECURE=false uv run uvicorn app.main:app --reload
 ```
 
-Without `uv`:
+`COOKIE_SECURE=false`는 `http://127.0.0.1` 로컬 개발에서만 사용합니다. 운영에서는 TLS reverse proxy와 `COOKIE_SECURE=true`를 유지합니다.
+
+## Docker
 
 ```bash
-python3.12 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[test]"
-uvicorn app.main:app --reload
+cp .env.example .env
+# .env의 공용 계정 hash와 session secret을 교체
+docker compose up -d --build
 ```
 
-## Tests
+Compose는 SQLite와 원본 업로드를 `/data` volume에 보존하며 외부 `proxy-net` network를 사용합니다.
+
+## 데모 데이터 초기화
+
+초기화는 공용 계정 설정(`app_settings`)은 유지하고, 업로드·재고·수출·배정 이력만 지웁니다. 기본적으로 SQLite backup을 먼저 만듭니다.
+
+```bash
+ssh <서버 별칭 또는 사용자@호스트>
+cd <DEPLOY_PATH>
+docker compose exec -T as-is python scripts/reset_demo.py --yes --purge-uploads
+docker compose exec -T as-is python -c 'import sqlite3; c=sqlite3.connect("/data/as_is.db"); print({t:c.execute(f"select count(*) from {t}").fetchone()[0] for t in ["import_lots","export_requirements","export_allocations","upload_batches"]})'
+```
+
+Backup은 volume의 `/data/backups/as_is-<UTC timestamp>.db`에 남습니다.
+
+## 테스트
 
 ```bash
 uv run pytest
 ```
 
-or, inside an activated virtual environment:
+테스트에는 실제 100,000행 CSV를 background preview로 처리하고 review API가 50행만 반환하는 회귀 검증이 포함됩니다. 2026-09-16 Apple Silicon 로컬 측정은 약 28.3초, Python traced peak memory 약 42.9 MiB였습니다. 환경에 따라 달라질 수 있습니다.
 
-```bash
-pytest
-```
+## 결과 Excel
 
-## Docker
+- `수출 결과`: 원본 수출 필드를 배정 수만큼 반복하고 수입신고번호, 수리일, 원산지, HS, 란/행, 규격, 배정 수량을 연결합니다.
+- `원상태잔량`: 다운로드 시점의 수입 로트별 수입/사용/잔량을 제공합니다.
 
-```bash
-docker compose up -d --build
-```
-
-The provided compose file expects an external Docker network named `proxy-net`, because it is intended for a reverse-proxy runtime host. For a standalone local Docker demo, either create that network first or adapt the compose file for your environment.
-
-## Reports
-
-The app can download:
-
-- export allocation evidence as CSV,
-- a contest-style workbook with inventory and allocation sheets,
-- a full workbook with inventory, matching, summary, and part-number inventory views.
+본 도구는 UNI-PASS 제출이나 법률·세무 판단을 자동화하지 않습니다.
 
 ## CI/CD
 
-GitHub Actions runs tests on pull requests. On `main` pushes or manual runs, the workflow builds and publishes a Docker image to GitHub Container Registry. SSH deployment requires the repository deployment secrets documented in `.github/workflows/ci-cd.yml`.
-
-## Roadmap
-
-- clearer import/export template documentation,
-- reviewer-focused audit trail for matching decisions,
-- packaged local desktop shell,
-- optional encrypted local database storage,
-- production-grade authentication and authorization for hosted use.
-
-## Contributing
-
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, tests, and pull request expectations.
-
-## Security
-
-Please do not open public issues for sensitive reports. See [SECURITY.md](SECURITY.md) for the current reporting policy and project security boundary.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+Pull request에서는 tests를 실행합니다. `main` push에서는 tests → GHCR image build → SSH host의 `docker compose up -d --build` 순으로 배포합니다. 배포 host의 `<DEPLOY_PATH>/.env`에 `APP_USERNAME`, `APP_PASSWORD_HASH`, `SESSION_SECRET`이 먼저 설정되어 있어야 합니다.

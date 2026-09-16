@@ -4,6 +4,12 @@ services:
     container_name: as-is
     environment:
       DATABASE_URL: sqlite:////data/as_is.db
+      UPLOAD_DIR: /data/uploads
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
+      APP_USERNAME: ${APP_USERNAME:?APP_USERNAME must be set}
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH:?APP_PASSWORD_HASH must be set}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
     volumes:
       - as_is_data:/data
     networks:

@@ -26,7 +26,7 @@ class StoredUpload:
 
 
 def upload_root() -> Path:
-    return Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
+    return Path(os.getenv("UPLOAD_DIR", "./data/uploads"))
 
 
 def max_upload_bytes() -> int:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO, StringIO
 import csv
@@ -286,9 +286,18 @@ def optional_text(value: Any) -> str | None:
 
 
 def parse_date(value: Any, field: str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     text = clean_text(value)
     if not text:
         raise ValueError(f"{field} is required.")
+    for date_format in ("%Y-%m-%d", "%Y%m%d", "%Y.%m.%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, date_format).date()
+        except ValueError:
+            continue
     parsed = pd.to_datetime(text, errors="coerce")
     if pd.isna(parsed):
         raise ValueError(f"{field} must be a valid date.")

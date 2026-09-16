@@ -40,7 +40,7 @@ def process_upload_preview_job(
     *,
     session_factory: sessionmaker[Session] = SessionLocal,
 ) -> None:
-    from app.services.uploads import preview_export_run, preview_imports
+    from app.services.uploads import ImportPreviewAccumulator, preview_export_run
 
     with session_factory() as db:
         job = db.get(ProcessingJob, job_id)
@@ -56,14 +56,19 @@ def process_upload_preview_job(
 
         try:
             rows = []
+            accumulator = ImportPreviewAccumulator(db, batch) if batch.upload_type == "imports" else None
+            processed = 0
             for processed, row in enumerate(iter_file_rows(batch.source_path, batch.upload_type), start=1):
-                rows.append(row)
-                if processed % 100 == 0:
+                if accumulator is not None:
+                    accumulator.process(processed + 1, row)
+                else:
+                    rows.append(row)
+                if processed % 500 == 0:
                     job.processed_rows = processed
                     batch.processed_rows = processed
                     db.commit()
-            if batch.upload_type == "imports":
-                preview_imports(db, rows, batch.filename, batch=batch)
+            if accumulator is not None:
+                accumulator.finalize(processed)
             elif batch.upload_type == "exports":
                 preview_export_run(
                     db,
@@ -75,8 +80,8 @@ def process_upload_preview_job(
             else:
                 raise ValueError("Unsupported upload type.")
             db.refresh(job)
-            job.processed_rows = len(rows)
-            job.total_rows = len(rows)
+            job.processed_rows = processed
+            job.total_rows = processed
             job.status = "review_ready"
             job.finished_at = now_utc()
             batch.status = "review_ready"

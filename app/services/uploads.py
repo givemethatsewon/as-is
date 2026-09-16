@@ -474,6 +474,88 @@ def _payload_values_match(left: dict[str, Any], right: dict[str, Any]) -> bool:
     )
 
 
+class ImportPreviewAccumulator:
+    """Classify and persist import rows incrementally for large background jobs."""
+
+    def __init__(self, db: Session, batch: UploadBatch):
+        if batch.upload_type != "imports":
+            raise ValueError("Import preview accumulator requires an import batch.")
+        self.db = db
+        self.batch = batch
+        self.statuses: Counter[str] = Counter()
+        self.seen_hashes: dict[tuple[str, str, str, str, str], str] = {}
+        self.source_by_canonical: dict[str, str] | None = None
+        self.active_existing: dict[tuple[str, str, str, str, str], ImportLot] = {}
+        self.invalidated_existing: dict[tuple[str, str, str, str, str], ImportLot] = {}
+
+        for lot in db.scalars(select(ImportLot)):
+            key = (
+                lot.import_declaration_no,
+                lot.line_no,
+                lot.row_no,
+                clean_part_number(lot.part_number),
+                lot.origin,
+            )
+            owner = db.get(UploadBatch, lot.upload_batch_id) if lot.upload_batch_id else None
+            if owner is not None and owner.invalidated_at is not None:
+                self.invalidated_existing[key] = lot
+            else:
+                self.active_existing[key] = lot
+
+    def process(self, row_number: int, source_row: dict[str, Any]) -> None:
+        if self.source_by_canonical is None:
+            normalized_rows, mapping = normalize_import_columns([source_row])
+            self.source_by_canonical = mapping
+            normalized_source = normalized_rows[0]
+            self.batch.column_mapping_json = json.dumps(mapping, ensure_ascii=False)
+        else:
+            normalized_source = {
+                canonical: source_row.get(source)
+                for canonical, source in self.source_by_canonical.items()
+            }
+
+        try:
+            payload = normalize_import_row(normalized_source)
+            key = import_business_key(payload)
+            payload_hash = hashlib.sha256(
+                json.dumps(payload, default=_json_default, sort_keys=True).encode()
+            ).hexdigest()
+            if key in self.seen_hashes:
+                if self.seen_hashes[key] == payload_hash:
+                    status, message = "duplicate", "Duplicate lot inside uploaded file."
+                else:
+                    status, message = "conflict", "Uploaded file has the same business key with different values."
+            else:
+                self.seen_hashes[key] = payload_hash
+                existing = self.active_existing.get(key)
+                if existing is not None:
+                    status, message = _classify_existing_import(existing, payload)
+                elif key in self.invalidated_existing:
+                    status, message = "reactivate", "무효 처리된 기존 수입 건을 새 업로드 기준으로 다시 활성화합니다."
+                else:
+                    status, message = "new", "Ready to insert."
+        except ValueError as exc:
+            payload = {key: clean_text(value) for key, value in source_row.items()}
+            status, message = "error", str(exc)
+
+        self.statuses[status] += 1
+        self.db.add(
+            UploadPreviewRow(
+                batch_id=self.batch.id,
+                row_number=row_number,
+                row_status=status,
+                message=message,
+                payload_json=json.dumps(payload, default=_json_default, ensure_ascii=False),
+            )
+        )
+
+    def finalize(self, total_rows: int) -> None:
+        self.batch.total_rows = total_rows
+        self.batch.processed_rows = total_rows
+        self.batch.status = "review_ready"
+        _apply_status_counts(self.batch, self.statuses)
+
+
 def confirm_batch(db: Session, batch_id: str) -> dict[str, int | str]:
     batch = db.get(UploadBatch, batch_id)
     if batch is None:
