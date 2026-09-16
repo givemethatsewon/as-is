@@ -357,6 +357,7 @@ def test_upload_page_explains_video_style_excel_files(client):
     assert "수출신고번호" in response.text
     assert "수량단위_1" in response.text
     assert 'action="/upload"' in response.text
+    assert "data-direct-match-form" in response.text
     assert "두 파일로 바로 매칭 실행" in response.text
     assert "전체" not in response.text
     assert "신규" not in response.text
@@ -416,6 +417,34 @@ def test_direct_matching_accepts_korean_declaration_workbooks_columns(client):
     assert "IN58330A0000" in response.text
     inventory = client.get("/api/inventory", params={"part_number": "IN58330A0000", "origin": "IN"})
     assert inventory.json()["remaining_qty"] == 138
+
+
+def test_direct_matching_supports_async_browser_submission(client):
+    import_csv = (
+        "import_declaration_no,import_accepted_date,origin,hs_code,line_no,row_no,part_number,spec,import_qty,qty_unit\n"
+        "A,2025-01-16,CN,8708309000,004,01,MTG011114,STEERING RACK,20,PC\n"
+    )
+    export_csv = (
+        "export_date,part_number,required_qty,description,unit_price\n"
+        "2025-08-16,MTG011114,8,STEERING RACK,3\n"
+    )
+
+    response = client.post(
+        "/upload",
+        headers={"Accept": "application/json"},
+        files={
+            "import_file": ("imports.csv", import_csv, "text/csv"),
+            "export_file": ("exports.csv", export_csv, "text/csv"),
+        },
+    )
+
+    assert response.status_code == 200
+    redirect_url = response.json()["redirect_url"]
+    assert redirect_url.startswith("/batches/")
+    detail = client.get(redirect_url)
+    assert detail.status_code == 200
+    assert "업로드 및 매칭 완료" in detail.text
+    assert "결과 엑셀 다운로드" in detail.text
 
 
 def test_upload_review_detail_delete_and_invalidate_workflow(client):

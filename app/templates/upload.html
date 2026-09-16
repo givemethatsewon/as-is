@@ -12,7 +12,7 @@
 {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
 {% if error %}<p class="notice danger">{{ error }}</p>{% endif %}
 
-<form class="direct-match-form" action="/upload" method="post" enctype="multipart/form-data">
+<form class="direct-match-form" action="/upload" method="post" enctype="multipart/form-data" data-direct-match-form>
 <section class="split" id="upload-forms">
   <section class="panel">
     <h2>1. 수입 문서</h2>
@@ -37,6 +37,7 @@
   <div class="direct-match-actions">
     <button class="button primary" type="submit">두 파일로 바로 매칭 실행</button>
     <p class="muted">Part Number(`규격1`) equality만 적용하고 `신고일자` FIFO로 차감합니다.</p>
+    <p class="upload-feedback" role="status" aria-live="polite"></p>
   </div>
 </form>
 {% endblock %}

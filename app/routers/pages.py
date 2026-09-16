@@ -6,7 +6,7 @@ from datetime import date
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -246,6 +246,8 @@ async def upload_and_match_page(
         summary = run_matching(db)
     except (ParseError, ValueError) as exc:
         _discard_direct_upload_batches(db, batches)
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"detail": str(exc)}, status_code=400)
         return templates.TemplateResponse(
             request,
             "upload.html",
@@ -264,6 +266,9 @@ async def upload_and_match_page(
         f"수출 {export_confirmed['inserted_count']}건, 매칭 {summary.matched_count}건, "
         f"일부 매칭 {summary.partial_matched_count}건, 재고 부족 {summary.insufficient_stock_count}건"
     )
+    if "application/json" in request.headers.get("accept", ""):
+        query = urlencode({"message": message})
+        return JSONResponse({"redirect_url": f"/batches/{export_result.batch.id}?{query}"})
     return templates.TemplateResponse(
         request,
         "exports.html",
